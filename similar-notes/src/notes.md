@@ -51,27 +51,12 @@ plugin build error: can't resolve fs
 - when note changed, remove old note from model, and add new note
   - how slow might this be?
 
-### caveats/limitations
-
-- need to recreate the model if # of notes significant changes
-  - would it help to recreate model over time, too, after many things are removed/added?
-- not sure how many notes would be needed to benefit from a different LM (eg BERT)
-- not sure how well this works for smaller # of notes. development was done with a corpus of 800 notes (6mb text)
-- no support for attachments yet
-
-### future work
-
-- setting to adjust how many similar notes are displayed
-- setting to exclude specified notebooks from being included 
-- add option to remove linked notes from results (since they are obv already known/accounted for by user)
-- viz note similarities in 2d or 3d
-- optionally include note's tags in the embeddings (test how this changes results per note in practice)
-- - see gensim impl here: https://medium.com/wisio/a-gentle-introduction-to-doc2vec-db3e8c0cce5e
 
 ## tfjs notes
 
 tfjs has 'universal sentence encoder' LITE (converted to tsjs GraphModel), which is based on Transformer arch with 8k word piece vocab. wonder if this implies worse performance compared to top2vec's USE impl.
 
+using dot product for similarity, vs cosine. latter requires the magnitudes to be the same, which is done through data normalization.
 
 ## top2vec notes
 
@@ -105,8 +90,8 @@ converts doc to a vec, then searches vectors:
 ```
 
 inner refers to inner product of two arrays
-flip reverses the order of elements in an array along the given axis. shape preserved, elements reordered.
 argsort returns the indices that would sort an array
+flip reverses the order of elements in an array along the given axis. shape preserved, elements reordered.
 
 is it this easy to do in js? is there numpy equiv?
 - maybe tensorflow.js itself?
