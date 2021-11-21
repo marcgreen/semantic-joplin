@@ -17,14 +17,19 @@ It might be the case that better results could be achieved with a different mode
 - not sure how many notes would be needed to benefit from a different LM (eg BERT)
 - not sure how well this works for smaller # of notes. development was done with a corpus of 800 notes (6mb text)
 - no support for attachments yet
+- not sure if I should be doing preprocessing on the data before creating the embedding.
+  - top2vec does preprocessing before it calls USE to create the embedding...
 
 ## Future Work
 
-- setting to exclude specified notebooks from being included (borrow more code from Note Graph UI plugin)
 - add option to remove linked notes from results (since they are obv already known/accounted for by user)
+- setting to exclude specified notebooks from being included (borrow more code from Note Graph UI plugin)
+- save embeddings to disk, so they needn't be recalculated each time joplin starts
+  - at what point is this noticeable?
 - viz note similarities in 2d or 3d
 - optionally include note's tags in the embeddings (test how this changes results per note in practice)
 - - see gensim impl here: https://medium.com/wisio/a-gentle-introduction-to-doc2vec-db3e8c0cce5e
+
 
 ---
 

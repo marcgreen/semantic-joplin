@@ -1,21 +1,56 @@
 import joplin from 'api';
+//const Fs = joplin.plugins.require('fs-extra');
+//const Path = require('path');
 
-const Tf = require('@tensorflow/tfjs');
+//const Tf = require('@tensorflow/tfjs');
+import * as Tf from '@tensorflow/tfjs';
 const Use = require('@tensorflow-models/universal-sentence-encoder');
 
-//tf.enableDebugMode()
+// - webview
+// - test with my 800 notes
+// - optimize if necessary (save/load embeddings, don't unstack tensors, *Sync() to *(), fix all await/async/promises)
+// - critical todos (eg tensor dispose)
+// - clean things up
+// - write README
+// - publish plugin
 
+// const PluginDir = await joplin.plugins.dataDir();
+// const EmbeddingsJSONPath = Path.join(PluginDir, 'embeddings.json');
+// console.info('Checking if "' + PluginDir + '" exists:', await fs.pathExists(PluginDir));
 
-	// embed all notes into the model (on button click in settings, if possible)
-	// - what kind of preprocessing is needed?
-	// save the model to disk
-	// load the model (or show a message to user to go to settings)
-	// query the model
-	// - need to compare against every note afaik. wonder how slow this will be.
+//var All_notes: Map<string, Note> = {}
+
+// async function loadEmbeddings() {
+//     try {
+// 	// check if file exists. if not, assume this is the first time user is using this plugin
+// 	// todo
+	
+// 	Embeddings = await fs.readJson(EmbeddingsJSONPath)
+// 	console.log('loaded embeddings');
+//     } catch (err) {
+// 	console.error(err)
+//     }
+// }
+
+// async function saveEmbeddings() {
+//     try {
+// 	await fs.writeJson(EmbeddingsJSONPath, Embeddings)
+// 	console.log('saved embeddings')
+//     } catch (err) {
+// 	console.error(err)
+//     }
+// }
+
+interface Note {
+    id: string;
+    parent_id: string;
+    title: string;
+    body: string;
+    embedding: Tf.Tensor;
+}
 
 // code borrowed from joplin link graph plugin
-// todo add types back in lol
-async function getAllNotes() {
+async function getAllNotes(): Promise<Map<string, Note>> {
     var allNotes = []
     var page_num = 1;
     do {
@@ -35,18 +70,15 @@ async function getAllNotes() {
 	page_num++;
     } while (notes.has_more)
 
-    return allNotes;
-    // this might be useful when filtering out linked note
-    // const noteMap = new Map();
-    // for (const note of allNotes) {
-    //   var links = getAllLinksForNote(note.body);
-    //   noteMap.set(note.id, {title: note.title, parent_id: note.parent_id, links: links})
-    // }
-    // return noteMap;
+    const noteMap = new Map();
+    for (const note of allNotes) {
+	noteMap.set(note.id, {id: note.id, title: note.title, parent_id: note.parent_id, body: note.body})
+    }
+    return noteMap;
 }
 
 // TODO look at how doc2vec impls this
-function search_similar_embeddings(tensor, tensors) {
+function search_similar_embeddings(tensor, notes) {
     // tensor is 1x512
     // tensors is Nx512 where N = # notes
     
@@ -65,10 +97,15 @@ function search_similar_embeddings(tensor, tensors) {
     //const flipped = Tf.transpose(tensor);
     //Tf.unstack(tensors).forEach(t => scores.push(Tf.dot(tensor, t)));
 
-    const ts = Tf.unstack(tensors);
     //console.log(ts.length)
-    for (const t of ts) {
-	const score = parseFloat(Tf.dot(tensor, t).dataSync());
+    //console.log(notes);
+    for (const [id, n] of notes.entries()) {
+	console.log(id, n);
+	const tensor2: Tf.Tensor = n.embedding;
+	const x: Tf.Tensor = Tf.dot(tensor, tensor2.transpose());
+	const y = x.dataSync();
+	const score = y[0]; //parseFloat(y);
+	console.log(score);
 	//tensor.print(true);
 	//t.print(true);
 	//score.print(true);
@@ -85,8 +122,8 @@ function search_similar_embeddings(tensor, tensors) {
     // 	t.print();
     // }
     
-    const {values, indices} = Tf.topk(scores, ts.length);
-    const syncedIndices = indices.arraySync();
+    const {values, indices} = Tf.topk(scores, scores.length);
+//    const syncedIndices: Array<number> = Array.from(indices.arraySync());
     // console.log(indices);
     // console.log(syncedIndices);
     // for (const i of indices) {
@@ -99,7 +136,7 @@ function search_similar_embeddings(tensor, tensors) {
     // sort the scores, but keep track of the index they were in? aka np.flip + np.argsort I think
     // then retrieve scores
     
-    return [syncedIndices, values.arraySync()];
+    return [indices, values];
     
     // for tensors to tensors: (todo replace with np.inner, still)
     // var scores = [];
@@ -129,18 +166,49 @@ function search_similar_embeddings(tensor, tensors) {
 //       }
 
 function notes2docs(notes) {
-    //console.log('notes: ', notes);
-    const docs = notes.map(note => note.title + "\n" + note.body);
+    console.log('notes: ', notes);
+    var docs = [];
+    for (const n of notes) {
+	docs.push(n.title + "\n" + n.body);
+    }
     return docs;
 }
 
+async function getAllNoteEmbeddings() {
+    const all_notes = await getAllNotes();
+    const all_documents = notes2docs(all_notes.values());
+    const tensors = await Use.load().then(model => model.embed(all_documents));
 
-// dataDir for saving/loading embeddings: https://joplinapp.org/api/references/plugin_api/classes/joplinplugins.html
+    // prob don't want to do this for optimization reasons?
+    // (prob faster to compute simlarity all in one go, vs iteratively for each tensor)
+    const tensors_array = Tf.unstack(tensors);
+
+    //embedding_map = {}
+    const keys = [...all_notes.keys()];
+    for (var i = 0; i < all_notes.size; i += 1) {
+	const nid = keys[i];
+	var n = all_notes.get(nid);
+	n['embedding'] = tensors_array[i];
+	all_notes.set(nid, n);
+	//embedding_map[all_notes[i].id] = tensors_array[i];
+    }
+
+    // TODO need to dispose of tensors at some point. is there a joplin onShutdown?
+
+    return all_notes;
+}
 
 joplin.plugins.register({
     onStart: async function() {
 	await Tf.ready(); // any perf issue of keeping this in prod code?
 	console.info('tensorflow backend: ', Tf.getBackend());
+
+	// TODO not sure what i'm doing with this async/await stuff
+	// think I ought to rethink thru the design around this
+	const notes = await getAllNoteEmbeddings();
+	
+	// todo await?
+	// loadEmbeddings();
 
 	// todo see toc plugin for basics of adding/styling/interactivizing FE UI element
 	//   https://joplinapp.org/api/tutorials/toc_plugin/
@@ -151,22 +219,15 @@ joplin.plugins.register({
 	    return;
 	}
 
-	// looking at the QnA model code, I anticipate I'll want to save the embeddings.
-	// ok, so the large-scale compare embed
-	// but before investing in that, want to make sure I can get the use of
-	//   embeddings working with small #
-	// this might be analagous to top2vec's model save/load/create model mechanism?
-	// queries model for similar notes
-	// updates webview with results
+	// this will modify the global Embeddings variable for the given note,
+	// compute the new similarities to all other notes,
+	// and display them in sorted order in the WebView
 	async function updateSimilarNoteList(updateType: string) {
 	    console.info('updating bc: ', updateType)
 	    // Get the current note from the workspace.
 	    const note = await joplin.workspace.selectedNote();
 	    console.info('selected note title:\n', note.title);
 
-	    // getting all notes here just to prove this works.
-	    // then do this when user clicks button in setting, and store to global var or smt
-	    const all_notes = await getAllNotes();
 
 	    // Keep in mind that it can be `null` if nothing is currently selected!
 	    if (note) {
@@ -175,36 +236,34 @@ joplin.plugins.register({
 
 		Use.load().then(model => {
 		    model.embed(document).then(tensor => {
+			// update our embedding of this note
+			const n = notes.get(note.id);
+			n['embedding'] = tensor;
+			notes.set(note.id, n);
+			
 			//console.info(tensor);
 			// `tensor` is a tensor consisting of the 512-dimensional embeddings for each sentence.
 
 			// TODO update idex with embedding for this note, keyed on note.id
 
-			const all_documents = notes2docs(all_notes);
-			model.embed(all_documents).then(all_tensors => {
-			    //console.info(all_tensors);
-			    // all_tensors.print(true);
-			    // should be tensor with n elements, each 512 dim tensor
-			    const [similar_note_indexes, similar_note_scores] = search_similar_embeddings(tensor,
-													  all_tensors);
+			const [similar_note_indexes, similar_note_scores] = search_similar_embeddings(tensor, notes);
+			console.log(similar_note_indexes, similar_note_scores);
+			// for (const nidx of similar_note_indexes) {
+			//     const n: Note = notes.get(nidx);
+			//     console.info(n.title, ": ", similar_note_scores[nidx]);
+			// }
+			// todo only send list of...how to refer to joplin note s.t. it can be displayed?
+			// todo it def needs to be clickable. ideally like the main note scrolllist. if not, then like
+			//   backlink list hyperlinks
+			
+			//similar_notes = similar_note_indexes // todo
+			//webviewUpdate(similar_notes)
 
-			    for (const nid of similar_note_indexes) {
-				console.info(all_notes[nid].title, ": ", similar_note_scores[nid]);
-			    }
-			    // todo only send list of...how to refer to joplin note s.t. it can be displayed?
-			    // todo it def needs to be clickable. ideally like the main note scrolllist. if not, then like
-			    //   backlink list hyperlinks
-			    
-			    //similar_notes = similar_note_indexes // todo
-			    //webviewUpdate(similar_notes)
+			// webgl BE requires manual mem mgmt.
+			// todo use tf.tidy to reduce risk of forgetting to call dispose
 
-			    // webgl BE requires manual mem mgmt.
-			    // todo use tf.tidy to reduce risk of forgetting to call dispose
-
-			});
 			// TODO
 			//tensor.dispose();
-			//all_tensors.dispose();
 		    });				    
 		});
 		
@@ -224,18 +283,20 @@ joplin.plugins.register({
 
 	// This event will be triggered when the content of the note changes
 	await joplin.workspace.onNoteChange(() => {
-	    // TODO re-embed note (overwrite old embedding)
-	    // time how long it takes for a lenghty note. what happens if user closes joplin during this?
-	    
+	    // this will update global Embeddings for us, compare to other notes, and show user results
 	    updateSimilarNoteList('note change');
+
+	    // so we just need to store the updated embedding in the filesystem
+	    // saveEmbeddings();
+	    // TODO feels a bit overkill to write the entire json every time a single note changes...
+	    // can we use joplin's sqlite to persist to disk?
 	});
 
 	// await joplin.settings.onChange( async () => {
 	//     updateSimilarNoteList();
 	// });
 
-	// Also update when the plugin starts
-	updateSimilarNoteList('on start');
+	// TODO update webview with blurb about selecting a note
 	
     },
 });
