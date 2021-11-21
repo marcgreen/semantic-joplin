@@ -58,6 +58,12 @@ tfjs has 'universal sentence encoder' LITE (converted to tsjs GraphModel), which
 
 using dot product for similarity, vs cosine. latter requires the magnitudes to be the same, which is done through data normalization.
 
+webgl backend is erroring on windows (passthrough is not supported, GL is disabled). wasm backend has errors about perf-tools and smt else. node has errors about missing aws-sdk and some other modules...
+- oh, looks like wasm BE doesn't support USE (according to npmjs.com). wonder if this is still true
+- trying cpu BE just to test semantic similarity scores with my main corpus of notes (on my win box)
+  - get the same GL is disabled error as with webgl
+- this gpu init error is an issue on electron's GH, recent comments from Sept 2021
+
 ## top2vec notes
 
 ### how top2vec uses USE for document similarity

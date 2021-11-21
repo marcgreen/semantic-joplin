@@ -1,8 +1,21 @@
 # Semantically Similar Notes
 
+## Work In Progress
+
+Only tested on osx, with very small number of notes. Ran into problems when testing on Windows:
+- webgl backend is erroring on windows (`passthrough is not supported, GL is disabled`). wasm backend has errors about perf-tools and smt else. node has errors about missing aws-sdk and some other modules...
+  - oh, looks like wasm BE doesn't support USE (according to npmjs.com). wonder if this is still true
+  - trying cpu BE just to test semantic similarity scores with my main corpus of notes (on my win box)
+    - get the same GL is disabled error as with webgl...?
+  - this gpu init error is an issue on electron's GH, recent comments from Sept 2021
+  - other people around the internet are asking about this error. only soln I've seen people report success with is to revert to older version of electron.
+
+
+## Summary
+
 The intent of this plugin is to help the joplin user find notes they have that might be relevant to the one they are editing. We plan to filter out linked notes despite relevancy, as an explicit linking implies the user is already aware of the relevance. This filtering is not yet implemented, however.
 
-Disclaimer: This plugin was written during a 2-week hackathon, without prior javascript or tensorflow familiarity. I'm grateful it seems to even work like one would expect. PRs more than welcome :)
+Disclaimer: This plugin was written during a 2-week hackathon, without prior javascript or tensorflow experience. PRs more than welcome :)
 
 ## Semanticness
 
@@ -26,6 +39,7 @@ It might be the case that better results could be achieved with a different mode
 - setting to exclude specified notebooks from being included (borrow more code from Note Graph UI plugin)
 - save embeddings to disk, so they needn't be recalculated each time joplin starts
   - at what point is this noticeable?
+- change UI to look identical to default joplin note list
 - viz note similarities in 2d or 3d
 - optionally include note's tags in the embeddings (test how this changes results per note in practice)
 - - see gensim impl here: https://medium.com/wisio/a-gentle-introduction-to-doc2vec-db3e8c0cce5e

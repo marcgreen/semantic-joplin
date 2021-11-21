@@ -6,9 +6,10 @@ import joplin from 'api';
 import * as Tf from '@tensorflow/tfjs';
 const Use = require('@tensorflow-models/universal-sentence-encoder');
 
-// - webview
+// - improve webview: scrollview
 // - test with my 800 notes
 // - optimize if necessary (save/load embeddings, don't unstack tensors, *Sync() to *(), fix all await/async/promises)
+// - fix cross platform issues
 // - critical todos (eg tensor dispose)
 // - clean things up
 // - write README
@@ -91,6 +92,7 @@ function search_similar_embeddings(tensor, notes) {
     // this is equiv of np.inner
     // todo why does official tf USE readme not use Tf.dot?
     var scores = [];
+    var ids = [];
     //const num_tensors = tensors.arraySync()[0].length
     //Tf.unstack(tensors).forEach(t => t.print(true));
     // todo extend tensor to same dim as tensors, and do mult in 1 op, vs forEach
@@ -102,15 +104,16 @@ function search_similar_embeddings(tensor, notes) {
     for (const [id, n] of notes.entries()) {
 	console.log(id, n);
 	const tensor2: Tf.Tensor = n.embedding;
-	const x: Tf.Tensor = Tf.dot(tensor, tensor2.transpose());
+	const x = Tf.dot(tensor, tensor2.transpose());
 	const y = x.dataSync();
-	const score = y[0]; //parseFloat(y);
+	const score = y[0]; // TODO why [0]? //parseFloat(y);
 	console.log(score);
 	//tensor.print(true);
 	//t.print(true);
 	//score.print(true);
 	//console.log(score.dataSync()); // not a tensor, just an array32Float
 	//console.log(parseFloat(score.dataSync())); // normal js float
+	ids.push(id);
 	scores.push(score);
     }
     // for (let i = 0; i < num_tensors; i++) {
@@ -132,11 +135,20 @@ function search_similar_embeddings(tensor, notes) {
 
     values.print();
     indices.print();
+
+    //    const ia: Array<number> = Array.from([indices.arraySync()]);
+    const ia = indices.arraySync();
+    
+    var sorted_note_ids: Array<number> = [];
+    for (var i = 0; i < notes.size; i++) {
+	const id_index = ia[i];
+	sorted_note_ids.push(ids[id_index]);
+    }
     
     // sort the scores, but keep track of the index they were in? aka np.flip + np.argsort I think
     // then retrieve scores
     
-    return [indices, values];
+    return [sorted_note_ids, values.arraySync()];
     
     // for tensors to tensors: (todo replace with np.inner, still)
     // var scores = [];
@@ -198,10 +210,46 @@ async function getAllNoteEmbeddings() {
     return all_notes;
 }
 
+// borrowed from backlinks plugin: https://github.com/ambrt/joplin-plugin-referencing-notes/blob/master/src/index.ts
+function escapeTitleText(text: string) {
+    return text.replace(/(\[|\])/g, '\\$1');
+}
+
 joplin.plugins.register({
     onStart: async function() {
 	await Tf.ready(); // any perf issue of keeping this in prod code?
 	console.info('tensorflow backend: ', Tf.getBackend());
+
+	// Create the panel object
+	const panel = await joplin.views.panels.create('semanticlly_similar_notes_panel');
+	await joplin.views.panels.setHtml(panel, 'Select a note to see similar notes');
+	await joplin.views.panels.onMessage(panel, async (message) => {
+	    await joplin.commands.execute("openNote", message.noteId)
+	});
+
+
+	// todo see toc plugin for basics of adding/styling/interactivizing FE UI element
+	//   https://joplinapp.org/api/tutorials/toc_plugin/
+	//
+	// also the Favorites plugin does smt similar to what I envison wrt UI element
+	//   https://emoji.discourse-cdn.com/twitter/house.png?v=10
+	async function updateWebView(similar_notes) {
+	    const html_links = []
+	    for (const n of similar_notes) {
+		const ahref = `<a href="#" onclick="webviewApi.postMessage({type:'openNote',noteId:'${n.id}'})">${escapeTitleText(n.title)}</a>`
+		html_links.push(ahref);
+	    }
+
+	    // TODO wrap in a scrollview
+	    
+	    await joplin.views.panels.setHtml(panel, `
+					<h3>Semantically Similar Notes</h3>
+					<div class="container">
+						${html_links.join('<br /><br />')}
+					</div>
+				`);
+	
+	}
 
 	// TODO not sure what i'm doing with this async/await stuff
 	// think I ought to rethink thru the design around this
@@ -210,15 +258,6 @@ joplin.plugins.register({
 	// todo await?
 	// loadEmbeddings();
 
-	// todo see toc plugin for basics of adding/styling/interactivizing FE UI element
-	//   https://joplinapp.org/api/tutorials/toc_plugin/
-	//
-	// also the Favorites plugin does smt similar to what I envison wrt UI element
-	//   https://emoji.discourse-cdn.com/twitter/house.png?v=10
-	async function updateWebView(similar_notes) {
-	    return;
-	}
-
 	// this will modify the global Embeddings variable for the given note,
 	// compute the new similarities to all other notes,
 	// and display them in sorted order in the WebView
@@ -226,38 +265,43 @@ joplin.plugins.register({
 	    console.info('updating bc: ', updateType)
 	    // Get the current note from the workspace.
 	    const note = await joplin.workspace.selectedNote();
-	    console.info('selected note title:\n', note.title);
-
 
 	    // Keep in mind that it can be `null` if nothing is currently selected!
 	    if (note) {
+		console.info('selected note title:\n', note.title);
+
+		await joplin.views.panels.setHtml(panel, 'Computing similarities...');
+
 		const [document] = notes2docs([note]);
 		//console.info('document:\n', document);
 
 		Use.load().then(model => {
-		    model.embed(document).then(tensor => {
+		    model.embed(document).then(tensor => { // tensor is 512dim embedding of document
 			// update our embedding of this note
 			const n = notes.get(note.id);
-			n['embedding'] = tensor;
+			n['embedding'] = tensor; // update embedding (todo optimize)
 			notes.set(note.id, n);
 			
-			//console.info(tensor);
-			// `tensor` is a tensor consisting of the 512-dimensional embeddings for each sentence.
+			const [sorted_note_ids, similar_note_scores] = search_similar_embeddings(tensor, notes);
+			//console.log(sorted_note_ids, similar_note_scores);
 
-			// TODO update idex with embedding for this note, keyed on note.id
+			// todo optimize this...
+			var sorted_notes = [];
+			for (var i = 0; i < notes.size; i++) {
+			    //for (const nidx of sorted_note_ids) {
+			    const nidx = sorted_note_ids[i];
 
-			const [similar_note_indexes, similar_note_scores] = search_similar_embeddings(tensor, notes);
-			console.log(similar_note_indexes, similar_note_scores);
-			// for (const nidx of similar_note_indexes) {
-			//     const n: Note = notes.get(nidx);
-			//     console.info(n.title, ": ", similar_note_scores[nidx]);
-			// }
-			// todo only send list of...how to refer to joplin note s.t. it can be displayed?
-			// todo it def needs to be clickable. ideally like the main note scrolllist. if not, then like
-			//   backlink list hyperlinks
+			    // don't link to ourself (prob always index 0? hopefully...)
+			    if (nidx == note.id) {
+				continue;
+			    }
+			    
+			    const n: Note = notes.get(nidx);
+			    sorted_notes.push(n);
+			    console.info(n.title, ": ", similar_note_scores[i]);
+			}
 			
-			//similar_notes = similar_note_indexes // todo
-			//webviewUpdate(similar_notes)
+			updateWebView(sorted_notes);
 
 			// webgl BE requires manual mem mgmt.
 			// todo use tf.tidy to reduce risk of forgetting to call dispose
@@ -271,8 +315,7 @@ joplin.plugins.register({
 
 		
 	    } else {
-		// TODO message in WebView that no note is selected
-		//console.info('No note is selected');
+		await joplin.views.panels.setHtml(panel, 'Select a note to see a list of semantically similar notes');
 	    }
 	}
 
@@ -296,7 +339,6 @@ joplin.plugins.register({
 	//     updateSimilarNoteList();
 	// });
 
-	// TODO update webview with blurb about selecting a note
-	
+	updateSimilarNoteList('startup');
     },
 });
