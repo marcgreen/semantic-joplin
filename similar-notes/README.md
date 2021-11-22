@@ -9,7 +9,9 @@ Only tested on osx, with very small number of notes. Ran into problems when test
     - get the same GL is disabled error as with webgl...?
   - this gpu init error is an issue on electron's GH, recent comments from Sept 2021
   - other people around the internet are asking about this error. only soln I've seen people report success with is to revert to older version of electron.
-
+- ok, seems like this webgl error isn't actually blocking creation of embeddings, unless it happens during an embedding?
+  - i started batching the embedding creation, and at around 800 documents it happens. it also happens shortly after I do < 800 embeddings, but doesn't block follow-on embeddings (I can select diff notes, and see their embeddings be created).
+  - what is going on?
 
 ## Summary
 
@@ -21,7 +23,7 @@ Disclaimer: This plugin was written during a 2-week hackathon, without prior jav
 
 We use tensorflow.js's [Universal Sentence Encoder Lite](https://github.com/tensorflow/tfjs-models/tree/master/universal-sentence-encoder) to encode each note into a 512 dimension vector, called an embedding. It's called a 'sentence encoder', but it seems to work for longer strings of text, too (eg, see doc2vec and top2vec). We use the dot product of two embeddings to determine similarity.
 
-It might be the case that better results could be achieved with a different model (eg mobileBERT, or BERT), or perhaps an entirely different approach, like one that does a simple keyword search instead (assuming a way to determine the right keywords to use).
+It might be the case that better results could be achieved with a different model (eg mobileBERT, or BERT), or perhaps an entirely different approach, like one that does a simple keyword search instead (assuming a way to determine the right keywords to use, perhaps via topic extraction).
 
 ## Caveats/Limitations
 
@@ -38,12 +40,14 @@ It might be the case that better results could be achieved with a different mode
 - add option to remove linked notes from results (since they are obv already known/accounted for by user)
 - setting to exclude specified notebooks from being included (borrow more code from Note Graph UI plugin)
 - save embeddings to disk, so they needn't be recalculated each time joplin starts
-  - at what point is this noticeable?
+  - at what point is this noticeable? answer: a few hundred notes, or less
 - change UI to look identical to default joplin note list
 - viz note similarities in 2d or 3d
 - optionally include note's tags in the embeddings (test how this changes results per note in practice)
 - - see gensim impl here: https://medium.com/wisio/a-gentle-introduction-to-doc2vec-db3e8c0cce5e
-
+- compare results of USE lite with mobileBERT
+- compare results of USE lite with topic extraction + keyword search
+- summarize each note via some other LM, and show summary blurb in results list, to help user know what's in each similar note
 
 ---
 

@@ -6,20 +6,29 @@ import joplin from 'api';
 import * as Tf from '@tensorflow/tfjs';
 const Use = require('@tensorflow-models/universal-sentence-encoder');
 
+console.log(Tf.memory())
+
+const MAX_DOCUMENTS = 600; // just for debugging
+
+//Tf.setBackend('cpu');
+
 // - improve webview: scrollview
-// - test with my 800 notes
-// - optimize if necessary (save/load embeddings, don't unstack tensors, *Sync() to *(), fix all await/async/promises)
-// - fix cross platform issues
+// - test with my 900 notes
+// - - why does model die around 800 notes??
+// - optimize if necessary (don't unstack tensors, *Sync() to *(), fix all await/async/promises)
+// - - save USE model to disk so it's not redownloaded every time (assuming that is the case now)
+// - - save/load embeddings so they needn't be recalc'd every time joplin opens
 // - critical todos (eg tensor dispose)
 // - clean things up
 // - write README
 // - publish plugin
+// - compare semantic similarity results with full USE model, vs this USE lite model
 
 // const PluginDir = await joplin.plugins.dataDir();
 // const EmbeddingsJSONPath = Path.join(PluginDir, 'embeddings.json');
 // console.info('Checking if "' + PluginDir + '" exists:', await fs.pathExists(PluginDir));
 
-//var All_notes: Map<string, Note> = {}
+//let All_notes: Map<string, Note> = {}
 
 // async function loadEmbeddings() {
 //     try {
@@ -72,14 +81,19 @@ async function getAllNotes(): Promise<Map<string, Note>> {
     } while (notes.has_more)
 
     const noteMap = new Map();
+    let i = 0;
     for (const note of allNotes) {
+	i = i +1;
+	if (i > MAX_DOCUMENTS) { // just for testing TODO
+	    break;
+	}
 	noteMap.set(note.id, {id: note.id, title: note.title, parent_id: note.parent_id, body: note.body})
     }
     return noteMap;
 }
 
 // TODO look at how doc2vec impls this
-function search_similar_embeddings(tensor, notes) {
+function search_similar_embeddings(embedding, notes) {
     // tensor is 1x512
     // tensors is Nx512 where N = # notes
     
@@ -91,8 +105,8 @@ function search_similar_embeddings(tensor, notes) {
 
     // this is equiv of np.inner
     // todo why does official tf USE readme not use Tf.dot?
-    var scores = [];
-    var ids = [];
+    let scores = [];
+    let ids = [];
     //const num_tensors = tensors.arraySync()[0].length
     //Tf.unstack(tensors).forEach(t => t.print(true));
     // todo extend tensor to same dim as tensors, and do mult in 1 op, vs forEach
@@ -101,13 +115,17 @@ function search_similar_embeddings(tensor, notes) {
 
     //console.log(ts.length)
     //console.log(notes);
+    console.log(embedding); // this prints a 512dim even after gpu_init error
+    const tensor1 = Tf.tensor1d(embedding);
     for (const [id, n] of notes.entries()) {
 	console.log(id, n);
-	const tensor2: Tf.Tensor = n.embedding;
-	const x = Tf.dot(tensor, tensor2.transpose());
+	const tensor2: Tf.Tensor = Tf.tensor1d(n.embedding);
+	const x = Tf.dot(tensor1, tensor2.transpose());
 	const y = x.dataSync();
 	const score = y[0]; // TODO why [0]? //parseFloat(y);
 	console.log(score);
+
+	tensor2.dispose();
 	//tensor.print(true);
 	//t.print(true);
 	//score.print(true);
@@ -116,6 +134,7 @@ function search_similar_embeddings(tensor, notes) {
 	ids.push(id);
 	scores.push(score);
     }
+    tensor1.dispose();
     // for (let i = 0; i < num_tensors; i++) {
     // 	console.info('dotting ', tensor, ' and ', tensors[i]);
     // 	scores.push(Tf.dot(tensor, tensors[i]));
@@ -139,19 +158,18 @@ function search_similar_embeddings(tensor, notes) {
     //    const ia: Array<number> = Array.from([indices.arraySync()]);
     const ia = indices.arraySync();
     
-    var sorted_note_ids: Array<number> = [];
-    for (var i = 0; i < notes.size; i++) {
+    let sorted_note_ids: Array<number> = [];
+    for (let i = 0; i < notes.size; i++) {
 	const id_index = ia[i];
 	sorted_note_ids.push(ids[id_index]);
     }
     
-    // sort the scores, but keep track of the index they were in? aka np.flip + np.argsort I think
-    // then retrieve scores
+    // TODO dispose of values/indices
     
     return [sorted_note_ids, values.arraySync()];
     
     // for tensors to tensors: (todo replace with np.inner, still)
-    // var scores = [];
+    // let scores = [];
     // for (let i = 0; i < tensor1.length; i++) {
     // 	for (let j = 0; j < tensor2.length; j++) {
     // 	    scores.push(dotProduct(tensor1[i], tensor2[j]));
@@ -179,28 +197,70 @@ function search_similar_embeddings(tensor, notes) {
 
 function notes2docs(notes) {
     console.log('notes: ', notes);
-    var docs = [];
+    let docs = [];
     for (const n of notes) {
 	docs.push(n.title + "\n" + n.body);
     }
     return docs;
 }
 
-async function getAllNoteEmbeddings() {
-    const all_notes = await getAllNotes();
+async function getAllNoteEmbeddings(model) {
+    const all_notes = await getAllNotes();    
     const all_documents = notes2docs(all_notes.values());
-    const tensors = await Use.load().then(model => model.embed(all_documents));
+    console.log('creating embeddings');
+    //const tensors = await model.embed(['test']);
+    let embeddings = [];
+    const batch_size = 100;
+    const num_batches = Math.floor(all_documents.length/batch_size);
+    const remaining = all_documents.length % batch_size;
+    console.log(num_batches, ' ', remaining);
 
-    // prob don't want to do this for optimization reasons?
-    // (prob faster to compute simlarity all in one go, vs iteratively for each tensor)
-    const tensors_array = Tf.unstack(tensors);
+    async function embed_batch(slice) {
+	const tensors = await model.embed(slice);
+	// prob don't want to do this for optimization reasons?
+	// (prob faster to compute simlarity all in one go, vs iteratively for each tensor)
+	// or maybe we want to untensorize them asap and dispose the tensors?
+	const tensors_array = Tf.unstack(tensors);
+	let embeddings = [];
+	for (const t of tensors_array) {
+	    const a = t.arraySync(); // TODO why doesn't this need [0] but other arraySyncs do?
+	    //console.log(t, a);
+	    embeddings.push(a); 
+	    t.dispose();
+	}
+	tensors.dispose();
+	return embeddings;
+    }
+
+    // LEFT OFF why does embed() stop working after ~8000 documents?
+    // - will model still embed (on note switch) after gpu init errors and GL is disabled msg shows?
+
+    for (let i = 0; i < num_batches; i++) {
+	const slice = all_documents.slice(i*batch_size, (i+1)*batch_size);
+	//console.log(i, slice);
+	const e = await embed_batch(slice);
+	//console.log('e: ', e)
+	embeddings = embeddings.concat(e);
+	console.log('done ', i);
+	console.log(Tf.memory())
+    }
+    console.log('test');
+    if (remaining > 0) {
+	const slice = all_documents.slice(num_batches*batch_size);
+	console.log(slice);
+	embeddings = embeddings.concat(await embed_batch(slice));
+    }
+    //const tensors = await model.embed(all_documents);
+    console.log('created', num_batches, ' ', remaining);
 
     //embedding_map = {}
+    //console.log(embeddings);
     const keys = [...all_notes.keys()];
-    for (var i = 0; i < all_notes.size; i += 1) {
+    for (let i = 0; i < all_notes.size; i += 1) {
 	const nid = keys[i];
-	var n = all_notes.get(nid);
-	n['embedding'] = tensors_array[i];
+	let n = all_notes.get(nid);
+	n['embedding'] = embeddings[i];
+	console.log(n);
 	all_notes.set(nid, n);
 	//embedding_map[all_notes[i].id] = tensors_array[i];
     }
@@ -219,7 +279,8 @@ joplin.plugins.register({
     onStart: async function() {
 	await Tf.ready(); // any perf issue of keeping this in prod code?
 	console.info('tensorflow backend: ', Tf.getBackend());
-
+	//console.log(Tf.memory())
+	
 	// Create the panel object
 	const panel = await joplin.views.panels.create('semanticlly_similar_notes_panel');
 	await joplin.views.panels.setHtml(panel, 'Select a note to see similar notes');
@@ -227,6 +288,9 @@ joplin.plugins.register({
 	    await joplin.commands.execute("openNote", message.noteId)
 	});
 
+	const model = await Use.load();
+	console.log(Tf.memory())
+	console.log(model);
 
 	// todo see toc plugin for basics of adding/styling/interactivizing FE UI element
 	//   https://joplinapp.org/api/tutorials/toc_plugin/
@@ -253,7 +317,7 @@ joplin.plugins.register({
 
 	// TODO not sure what i'm doing with this async/await stuff
 	// think I ought to rethink thru the design around this
-	const notes = await getAllNoteEmbeddings();
+	const notes = await getAllNoteEmbeddings(model);
 	
 	// todo await?
 	// loadEmbeddings();
@@ -275,45 +339,41 @@ joplin.plugins.register({
 		const [document] = notes2docs([note]);
 		//console.info('document:\n', document);
 
-		Use.load().then(model => {
-		    model.embed(document).then(tensor => { // tensor is 512dim embedding of document
-			// update our embedding of this note
-			const n = notes.get(note.id);
-			n['embedding'] = tensor; // update embedding (todo optimize)
-			notes.set(note.id, n);
-			
-			const [sorted_note_ids, similar_note_scores] = search_similar_embeddings(tensor, notes);
-			//console.log(sorted_note_ids, similar_note_scores);
+		model.embed(document).then(tensor => { // tensor is 512dim embedding of document
+		    // update our embedding of this note
+		    const embedding = tensor.arraySync()[0];
+		    const n = notes.get(note.id);
+		    n['embedding'] = embedding; // update embedding (todo: move to onNoteChange)
+		    notes.set(note.id, n);
+		    tensor.dispose(); // dispose here but create in search_similar_embeddings -> prob slow
+		    
+		    const [sorted_note_ids, similar_note_scores] = search_similar_embeddings(embedding, notes);
+		    //console.log(sorted_note_ids, similar_note_scores);
 
-			// todo optimize this...
-			var sorted_notes = [];
-			for (var i = 0; i < notes.size; i++) {
-			    //for (const nidx of sorted_note_ids) {
-			    const nidx = sorted_note_ids[i];
+		    // todo optimize this...
+		    let sorted_notes = [];
+		    for (let i = 0; i < notes.size; i++) {
+			//for (const nidx of sorted_note_ids) {
+			const nidx = sorted_note_ids[i];
 
-			    // don't link to ourself (prob always index 0? hopefully...)
-			    if (nidx == note.id) {
-				continue;
-			    }
-			    
-			    const n: Note = notes.get(nidx);
-			    sorted_notes.push(n);
-			    console.info(n.title, ": ", similar_note_scores[i]);
+			// don't link to ourself (prob always index 0? hopefully...)
+			if (nidx == note.id) {
+			    continue;
 			}
 			
-			updateWebView(sorted_notes);
+			const n: Note = notes.get(nidx);
+			sorted_notes.push(n);
+			console.info(n.title, ": ", similar_note_scores[i]);
+		    }
+		    
+		    updateWebView(sorted_notes);
 
-			// webgl BE requires manual mem mgmt.
-			// todo use tf.tidy to reduce risk of forgetting to call dispose
+		    // webgl BE requires manual mem mgmt.
+		    // todo use tf.tidy to reduce risk of forgetting to call dispose
 
-			// TODO
-			//tensor.dispose();
-		    });				    
-		});
-		
-
-
-		
+		    // TODO
+		    //tensor.dispose();
+		});				    
 	    } else {
 		await joplin.views.panels.setHtml(panel, 'Select a note to see a list of semantically similar notes');
 	    }
