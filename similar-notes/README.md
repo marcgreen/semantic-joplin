@@ -16,7 +16,7 @@ Disclaimer: This plugin was written during a 2-week hackathon, without prior jav
 
 ### Using
 
-On first startup, this plugin will calculate embeddings for all of your notes. This can take many minutes (less than 10min for my 800 notes totalling several hundred KBs on my desktop computer). It saves these embeddings to disk and loads from there on subsequent startups.
+On first startup, this plugin will calculate embeddings for all of your notes. This can take some minutes (less than 2min for my 800 notes totalling several hundred KBs on my desktop computer). It saves these embeddings to disk and loads from there on subsequent startups.
 
 If it hangs/crashes during the initial embeddings computation, try restarting joplin. The plugin should resume where it left off before crashing. it might take many many restarts though, since the code to save these embeddings doesn't work as intended...
 

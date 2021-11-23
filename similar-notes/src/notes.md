@@ -43,15 +43,6 @@ plugin build error: can't resolve fs
   }
 ```
 
-### arch thoughts
-
-- have button in plugin settings to train the model on all nodes
-- on note view, query the model for top 10 similar notes
-  - check if model already trained, and show msg to user if not to train it
-- when note changed, remove old note from model, and add new note
-  - how slow might this be?
-
-
 ## tfjs notes
 
 tfjs has 'universal sentence encoder' LITE (converted to tsjs GraphModel), which is based on Transformer arch with 8k word piece vocab. wonder if this implies worse performance compared to top2vec's USE impl.
@@ -67,7 +58,23 @@ using dot product for similarity, vs cosine. latter requires the magnitudes to b
 - ok, seems like this webgl error isn't actually blocking creation of embeddings, unless it happens during an embedding?
   - i started batching the embedding creation, and at around 800 documents it happens. it also happens shortly after I do < 800 embeddings, but doesn't block follow-on embeddings (I can select diff notes, and see their embeddings be created).
   - what is going on?
-- figured out the model was hanging due to 1mb size note.
+- figured out the model was hanging due to 1mb size note, see following notes:
+// - test with my 900 notes
+// - - why does model die around 785-790 notes??
+// - - - maybe USE docs too long? -> yes, only encoding titles lets me get through all notes w/o hang
+// - - - - could split long notes and average their vectors? would that impact perf?
+// - - - - i ahve 1 note that's 1mb, next biggest 100kb. testing w/o 1mb note -> yes it works!
+// - - - - - so, maybe cut off each note at 200kb? and future work to avg 200kb chunks together
+// - - - - - implies that, say, 10000 notes would crash model too :(
+// - - - - - - actually maybe not, might just constrain size of single document
+// - - results in memleak - closing joplin still leaves process hogging a bunch of cpu
+// - - looks like number of gpu bytes allocatd keeps growing for some reason, every batch
+// - - also hangs when i try calling model.dispose()
+// - - trace when gpu_init gets called?
+// - - consider switching to mobileBERT? but mb test in python first?
+// - - workaround: save batche of embeddings to disk, and then just restart process as often as needed
+//     to get through all notes. yeesh...
+
 
 ## top2vec notes
 
