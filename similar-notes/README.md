@@ -14,22 +14,28 @@ The intent of this plugin is to help the joplin user find notes they have that m
 
 Disclaimer: This plugin was written during a 2-week hackathon, without prior javascript or tensorflow experience, and the code quality reflects this. PRs more than welcome :)
 
-### Using
+### On First Use
 
 On first startup, this plugin will calculate embeddings for all of your notes. This can take some minutes (less than 2min for my 800 notes totalling several hundred KBs on my desktop computer). It saves these embeddings to disk and loads from there on subsequent startups.
 
 If it hangs/crashes during the initial embeddings computation, try restarting joplin. The plugin should resume where it left off before crashing. it might take many many restarts though, since the code to save these embeddings doesn't work as intended...
 
+
 ## Semanticness
 
-We use tensorflow.js's [Universal Sentence Encoder Lite](https://github.com/tensorflow/tfjs-models/tree/master/universal-sentence-encoder) to encode each note into a 512 dimension vector, called an embedding. It's called a 'sentence encoder', but it seems to work for longer strings of text, too (eg, see doc2vec and top2vec). We use the dot product of two embeddings to determine similarity.
+We use tensorflow.js's [Universal Sentence Encoder Lite](https://github.com/tensorflow/tfjs-models/tree/master/universal-sentence-encoder) to encode each note into a 512 dimension vector, called an embedding. It's called a 'sentence encoder', but it seems to work for longer strings of text, too (eg, see doc2vec and top2vec). (The limit seems to be somewhere between 100 and ~1000 kilobytes of text, though this limit might be a bug in tfjs.) We use the dot product of two embeddings to determine similarity.
 
 It might be the case that better results could be achieved with a different model (eg mobileBERT, or BERT), or perhaps an entirely different approach, like one that does a simple keyword search instead (assuming a way to determine the right keywords to use, perhaps via topic extraction).
+
+### Quality of Results
+
+Sometimes the results of the semantic similarity computation are confusing or questionable. Consider that the model is comparing what it thinks the meaning of the words you're using in the selected note against all other notes. So there are three variables at play: the words used in the selected note, the words used in the note being compared against, and the model's understanding of our language.
+
+Testing the model against my own corpus of notes, I am satisified enough with its performance. But I would certainly be interested in trying out different models (and different approaches), like the ones mentioned in Future Work below.
 
 ## Caveats/Limitations
 
 - requires internet connection to download the USE model every time. would like to save it locally after first load
-  - ought to improve error messaging around this in the mean time
 - need to recreate the model if # of notes significantly changes
   - would it help to recreate model over time, too, after many things are removed/added?
 - no support for attachments yet
@@ -42,8 +48,10 @@ It might be the case that better results could be achieved with a different mode
 - start initial embedding computation only on user trigger, not automatically
 - remove linked notes from results (since they are obv already known/accounted for by user)
 - setting to exclude specified notebooks from being included (borrow more code from Note Graph UI plugin)
-- optimize similarity calculations for more responsive UI
+- optimize similarity calculations, and when they happen, for more responsive UI
 - save USE model locally, so it needn't be downloaded every time the plugin loads
+- fix potential edge case of note embedding unsyncing from note content
+- note list will still show notes that were deleted until next launch
 - UI webview/panel introduces weird whitespace offset in note editor/renderer
   - have seen this in some other plugins with webview panels too
 - change UI to look identical to default joplin note list
@@ -54,6 +62,8 @@ It might be the case that better results could be achieved with a different mode
 - compare results of USE lite with topic extraction + keyword search
 - summarize each note via some other LM, and show summary blurb in results list, to help user know what's in each similar note
   - maybe instead allow on-hover previews of the note?
+- wonder what results would be if we calculated similarity of multiple selected notes
+  (using onSelectedNoteIds event). could average the selected note embeddings
 
 ---
 

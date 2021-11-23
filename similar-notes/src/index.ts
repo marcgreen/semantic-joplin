@@ -13,17 +13,17 @@ Tf.enableProdMode(); // not sure the extent to which this helps
 
 //Tf.setBackend('cpu');
 
+// - ought to use event api for tracking note creation/updates/deletion
 // - optimize if necessary (don't unstack tensors, *Sync() to *(), fix all await/async/promises)
 // - - save USE model to disk so it's not redownloaded every time
-// - - recompute embedding (and ALL similirities if we can limit cpu/gpu and do in bg) in onNoteChange
+// - - recompute embedding (and ALL similirities if we can limit cpu/gpu and do in bg) via event queue
 // - critical todos (eg tensor dispose)
 // - - for tensor dispose, is there a joplin onShutdown?
 // - clean things up
 // - manually test some edge cases?
 // - UI issue that offsets note editor and renderer when width is made smaller
 //   (I've seen this in other plugins too)
-// - write README
-// - publish plugin
+// - publish plugin (how?)
 // - compare semantic similarity results with full USE model, vs this USE lite model
 
 function openDB(embeddingsDBPath) {
@@ -41,8 +41,12 @@ function openDB(embeddingsDBPath) {
     return db;
 }
 
+function deleteEmbedding(db, noteID) {
+    const stmt = db.prepare("DELETE FROM note_embeddings WHERE note_id = ?");
+    stmt.run(noteID).finalize();
+    console.info('deleted ' + noteID);
+}
 
-// async?
 async function loadEmbeddings(db) {
     console.info('loading embeddings');
     //    let prom = null;
@@ -81,7 +85,7 @@ async function loadEmbeddings(db) {
 function saveEmbeddings(db, idSlice, embeddings) {
     //console.info('saving', idSlice, embeddings);
     db.serialize(async function() {
-	let stmt = db.prepare("INSERT INTO note_embeddings (note_id, embedding) VALUES (?,?)");
+	let stmt = db.prepare("INSERT INTO note_embeddings (note_id, embedding) VALUES (?,?) ON CONFLICT(note_id) DO UPDATE SET embedding = excluded.embedding");
 
 	// this promise isn't doing what i want. want to essentially force db commit to happen
 	// bc otherwise model crashes the program before things get written... TODO
@@ -95,7 +99,7 @@ function saveEmbeddings(db, idSlice, embeddings) {
 	    resolve();
 	});
 	
-	console.info('to db', stmt);
+	console.info('to db', stmt, idSlice, embeddings);
     });
 }
 
@@ -132,7 +136,7 @@ interface Note {
     parent_id: string;
     title: string;
     body: string;
-    embedding: Tf.Tensor;
+    embedding: Array<number>;
     // we also shim in a score attribute...
 }
 
@@ -187,9 +191,9 @@ function search_similar_embeddings(embedding, notes) {
 
     //console.log(ts.length)
     //console.log(notes);
-//    console.log(embedding); // this prints a 512dim even after gpu_init error
+    //console.log(embedding); // this prints a 512dim even after gpu_init error
     const tensor1 = Tf.tensor1d(embedding);
-//    let i = 0;
+    //let i = 0;
     for (const [id, n] of notes.entries()) {
 	//console.log(i, id, n);
 	//i += 1;
@@ -227,8 +231,8 @@ function search_similar_embeddings(embedding, notes) {
     //  	i.print();
     // }
 
-    values.print();
-    indices.print();
+    //values.print();
+    //indices.print();
 
     //    const ia: Array<number> = Array.from([indices.arraySync()]);
     const ia = indices.arraySync();
@@ -282,6 +286,15 @@ async function getAllNoteEmbeddings(model, db, panel) {
     	remainingNotes.set(nid, allNotes.get(nid));
     }
 
+    // todo use event queue to handle this better
+    // delete notes from DB that are no longer in joplin proper
+    const deletedIDs = knownIDs.filter(id => !allNoteIDs.includes(id));
+    console.info('notes to delete from db: ', deletedIDs);
+    for (const nid of deletedIDs) {
+	deleteEmbedding(db, nid);
+	savedEmbeddings.delete(nid);
+    }
+
     progressHTML += `<br />Saved # embeddings: ${knownIDs.length}`;
     progressHTML += `<br />Remaining # embeddings: ${unembeddedIDs.length}`;
     await updateHTML(panel, progressHTML);
@@ -294,7 +307,7 @@ async function getAllNoteEmbeddings(model, db, panel) {
     const batch_size = 100;
     const num_batches = Math.floor(remaining_documents.length/batch_size);
     const remaining = remaining_documents.length % batch_size;
-    console.info(num_batches, ' ', remaining);
+    console.info('batches to run ', num_batches, ' ', remaining);
 
     progressHTML += `<br /><br />Batch Size: ${batch_size} notes`;
     progressHTML += `<br /># full batches: ${num_batches}`;
@@ -466,7 +479,7 @@ joplin.plugins.register({
 	//
 	// also the Favorites plugin does smt similar to what I envison wrt UI element
 	//   https://emoji.discourse-cdn.com/twitter/house.png?v=10
-	async function updatePanelNoteList(similar_notes) {
+	async function updateUIWithNoteList(similar_notes) {
 	    const html_links = []
 	    for (const n of similar_notes) {
 		const ahref = `<i>(${n.relative_score}%)</i> <a href="#" onclick="webviewApi.postMessage({type:'openNote',noteId:'${n.id}'})">${escapeTitleText(n.title)}</a>`
@@ -483,14 +496,20 @@ joplin.plugins.register({
 	
 	// not sure what i'm doing with this async/await stuff...
 	// think I ought to rethink the design around this
+	// notes is map of id to note
 	const notes = await getAllNoteEmbeddings(model, db, panel);
 
 	await updateHTML(panel, selectNotePromptHTML);
-	
-	// this will modify the global Embeddings variable for the given note,
-	// compute the new similarities to all other notes,
-	// and display them in sorted order in the WebView
-	async function updateSimilarNoteList(updateType: string) {
+
+	// if reEmbed,
+	//   this will compute the embedding for the selected note,
+	//   update the var in which we store all notes,
+	//   and save the new embedding to the db.
+	// regardless of reEmbed, this will:
+	//   compute the similarities to all other notes,
+	//   and display them in sorted order in the WebView
+	// todo could conditionally recompute similarities, too
+	async function updateSimilarNoteList(updateType: string, reEmbed: boolean) {
 	    console.info('updating bc: ', updateType)
 	    // Get the current note from the workspace.
 	    const note = await joplin.workspace.selectedNote();
@@ -501,47 +520,73 @@ joplin.plugins.register({
 
 		await updateHTML(panel, 'Computing similarities...');
 
-		const [document] = notes2docs([note]);
-		//console.info('document:\n', document);
+		let embedding = null;
+		let noteObj = notes.get(note.id);
+		
+		// if there is no note object, it's a new note, so create note obj
+		// and "re"Embed it
+		if (!noteObj) {
+		    reEmbed = true;
+		    noteObj = {id: note.id, title: note.title,
+			       parent_id: note.parent_id, body: note.body,
+			       embedding: null // will be set in a sec
+			      }
+		}
+		    
+		if (reEmbed) { 
+		    const [document] = notes2docs([note]);
+		    //console.info('document:\n', document);
 
-		model.embed(document).then(tensor => { // tensor is 512dim embedding of document
+		    const tensor = await model.embed(document);
+		    // tensor is 512dim embedding of document
+		
 		    // update our embedding of this note
-		    console.log('pre tensing', tensor);
-		    const embedding = tensor.arraySync()[0];
-		    const n = notes.get(note.id);
-		    n['embedding'] = embedding; // update embedding (todo: move to onNoteChange)
-		    notes.set(note.id, n);
+		    //console.log('pre tensing', tensor);
+		    embedding = tensor.arraySync()[0];
+		    noteObj['embedding'] = embedding;
+		    notes.set(note.id, noteObj);
 		    tensor.dispose(); // dispose here but create in search_similar_embeddings -> prob slow
+		    
+		    // persist the calculated embedding to disk
+		    // todo anyway to detect if the change doesn't make it?
+		    //  eg if pc lost power between the joplin note saving to disk
+		    //  and this func saving the corresponding new embedding,
+		    //  then results would be off until next time user edits this note
+		    // - could compare timestamp of last note change with timestamp
+		    //   of last embedding change on startup
+		    saveEmbeddings(db, [note.id], [embedding]);
+		} else {
+		    embedding = noteObj['embedding'];
+		}
 
-		    console.log('tensing', embedding);
-		    const [sorted_note_ids, similar_note_scores] = search_similar_embeddings(embedding, notes);
-		    //console.log(sorted_note_ids, similar_note_scores);
+		//console.log('tensing', embedding);
+		const [sorted_note_ids, similar_note_scores] = search_similar_embeddings(embedding, notes);
+		//console.log(sorted_note_ids, similar_note_scores);
 
-		    // todo optimize this...
-		    let sorted_notes = [];
-		    for (let i = 0; i < notes.size; i++) {
-			//for (const nidx of sorted_note_ids) {
-			const nidx = sorted_note_ids[i];
+		// todo optimize this...
+		let sorted_notes = [];
+		for (let i = 0; i < notes.size; i++) {
+		    //for (const nidx of sorted_note_ids) {
+		    const nidx = sorted_note_ids[i];
 
-			// don't link to ourself (prob always index 0? hopefully...)
-			if (nidx == note.id) {
-			    continue;
-			}
-			
-			const n: Note = notes.get(nidx);
-			n['relative_score'] = (similar_note_scores[i]*100).toLocaleString(undefined, {maximumSignificantDigits: 2});
-			sorted_notes.push(n);
-		        //console.info(n.title, ": ", similar_note_scores[i]);
+		    // don't link to ourself (prob always index 0? hopefully...)
+		    if (nidx == note.id) {
+			continue;
 		    }
 		    
-		    updatePanelNoteList(sorted_notes);
+		    const n = notes.get(nidx);
+		    n['relative_score'] = (similar_note_scores[i]*100).toLocaleString(undefined, {maximumSignificantDigits: 2});
+		    sorted_notes.push(n);
+		    //console.info(n.title, ": ", similar_note_scores[i]);
+		}
+		
+		updateUIWithNoteList(sorted_notes);
 
-		    // webgl BE requires manual mem mgmt.
-		    // todo use tf.tidy to reduce risk of forgetting to call dispose
+		// webgl BE requires manual mem mgmt.
+		// use tf.tidy to reduce risk of forgetting to call dispose
 
-		    // TODO
-		    //tensor.dispose();
-		});
+		// TODO
+		//tensor.dispose();
 		
 		//model.dispose();
 	    } else {
@@ -549,21 +594,24 @@ joplin.plugins.register({
 	    }
 	}
 
+	// TODO for snappier performance, I think we could to listen to the event queue
+	// and recompute embeddings whenever any notes changes. then just run the
+	// similarity comparison when the selected ntoe changes (or is updated).
+	// could potentially recompute all similarities in the background too,
+	// but that might be too much wasted computation to be worth it.
+	// for now, we just recompute the embedding whenever the note
+	// selection changes (or when selected note's content changes).
+	// - event api: https://joplinapp.org/api/references/rest_api/
+	// - ought to use event queue for deleting notes, too...
+	
 	// This event will be triggered when the user selects a different note
 	await joplin.workspace.onNoteSelectionChange(() => {
-	    updateSimilarNoteList('note selection');
+	    updateSimilarNoteList('note selection', false);
 	});
 
-	// This event will be triggered when the content of the note changes
+	// This event will be triggered when the content of the selected note changes
 	await joplin.workspace.onNoteChange(() => {
-	    // this will update global Embeddings for us, compare to other notes, and show user results
-	    updateSimilarNoteList('note change');
-
-	    // TODO need to save this
-
-	    // so we just need to store the updated embedding in the filesystem
-	    // saveEmbeddings();
-
+	    updateSimilarNoteList('note change', true);
 	});
 
 	// await joplin.settings.onChange( async () => {
