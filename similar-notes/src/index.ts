@@ -624,7 +624,7 @@ joplin.plugins.register({
 	//     updateSimilarNoteList();
 	// });
 
-	updateSimilarNoteList('startup');
+	updateSimilarNoteList('startup', false);
     },
 });
 
