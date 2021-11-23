@@ -13,13 +13,13 @@ Tf.enableProdMode(); // not sure the extent to which this helps
 
 //Tf.setBackend('cpu');
 
-// - ought to use event api for tracking note creation/updates/deletion
+// partial todo list
 // - optimize if necessary (don't unstack tensors, *Sync() to *(), fix all await/async/promises)
 // - - save USE model to disk so it's not redownloaded every time
 // - - recompute embedding (and ALL similirities if we can limit cpu/gpu and do in bg) via event queue
-// - critical todos (eg tensor dispose)
-// - - for tensor dispose, is there a joplin onShutdown?
+// - ought to use event api for tracking note creation/updates/deletion
 // - clean things up
+// - - probably some large refactors doable, now that I understand flow better
 // - manually test some edge cases?
 // - UI issue that offsets note editor and renderer when width is made smaller
 //   (I've seen this in other plugins too)
@@ -168,7 +168,7 @@ async function getAllNotes(): Promise<Map<string, Note>> {
     return noteMap;
 }
 
-// TODO look at how doc2vec impls this
+// consider looking at how doc2vec impls this for optimization inspo
 function search_similar_embeddings(embedding, notes) {
     // tensor is 1x512
     // tensors is Nx512 where N = # notes
@@ -200,7 +200,7 @@ function search_similar_embeddings(embedding, notes) {
 	const tensor2: Tf.Tensor = Tf.tensor1d(n.embedding);
 	const x = Tf.dot(tensor1, tensor2.transpose());
 	const y = x.dataSync();
-	const score = y[0]; // TODO why [0]? //parseFloat(y);
+	const score = y[0]; // returned as single element list, hence [0]
 	//console.log(score);
 
 	tensor2.dispose();
@@ -345,8 +345,7 @@ async function getAllNoteEmbeddings(model, db, panel) {
 	saveEmbeddings(db, idSlice, embeddings);
 	
 	return embeddings;
-	// TODO try tf.profile
-	// TODO try sleeping between batches? lol idk
+	// todo try tf.profile to understand model issue
     }
 
     progressHTML += "<br />";
@@ -474,10 +473,8 @@ joplin.plugins.register({
 
 	const db = openDB(embeddingsDBPath);
 
-	// todo see toc plugin for basics of adding/styling/interactivizing FE UI element
-	//   https://joplinapp.org/api/tutorials/toc_plugin/
-	//
-	// also the Favorites plugin does smt similar to what I envison wrt UI element
+	// the Favorites plugin does smt similar to what I envison wrt UI element
+	// (ie, it looks like the main note list in joplin)
 	//   https://emoji.discourse-cdn.com/twitter/house.png?v=10
 	async function updateUIWithNoteList(similar_notes) {
 	    const html_links = []
@@ -497,7 +494,10 @@ joplin.plugins.register({
 	// not sure what i'm doing with this async/await stuff...
 	// think I ought to rethink the design around this
 	// notes is map of id to note
-	const notes = await getAllNoteEmbeddings(model, db, panel);
+	let notes = await getAllNoteEmbeddings(model, db, panel);
+	// todo move part of this function inside updateSimilarNoteList
+	//  so that new note title names are accurate. but don't want to relaod
+	//  everything from DB
 
 	await updateHTML(panel, selectNotePromptHTML);
 
@@ -554,6 +554,7 @@ joplin.plugins.register({
 		    //  then results would be off until next time user edits this note
 		    // - could compare timestamp of last note change with timestamp
 		    //   of last embedding change on startup
+		    //console.log('test before save');
 		    saveEmbeddings(db, [note.id], [embedding]);
 		} else {
 		    embedding = noteObj['embedding'];
@@ -564,6 +565,9 @@ joplin.plugins.register({
 		//console.log(sorted_note_ids, similar_note_scores);
 
 		// todo optimize this...
+		// - keep things as tensors?
+		// - do large tensor multiplication of all note sims at once?
+		//   could do for 1:N note sims, but maybe also N:N?
 		let sorted_notes = [];
 		for (let i = 0; i < notes.size; i++) {
 		    //for (const nidx of sorted_note_ids) {
@@ -585,9 +589,6 @@ joplin.plugins.register({
 		// webgl BE requires manual mem mgmt.
 		// use tf.tidy to reduce risk of forgetting to call dispose
 
-		// TODO
-		//tensor.dispose();
-		
 		//model.dispose();
 	    } else {
 		await updateHTML(panel, selectNotePromptHTML);

@@ -52,6 +52,10 @@ Testing the model against my own corpus of notes, I am satisified enough with it
 - save USE model locally, so it needn't be downloaded every time the plugin loads
 - fix potential edge case of note embedding unsyncing from note content
 - note list will still show notes that were deleted until next launch
+- names of new notes created won't be visible in list until next launch
+  - both this and showing deleted notes can be resolved by moving part of
+    getAllNoteEmbeddings() into updateSimilarNoteList()
+- when creating new note, main func is called twice, which causes jitter
 - UI webview/panel introduces weird whitespace offset in note editor/renderer
   - have seen this in some other plugins with webview panels too
 - change UI to look identical to default joplin note list
