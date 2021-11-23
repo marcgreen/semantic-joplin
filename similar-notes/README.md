@@ -1,23 +1,24 @@
 # Semantically Similar Notes
 
-## Work In Progress
+## WARNING - will crash if you have large (megabyte+) notes (ignoring attachments)
 
-Only tested on osx, with very small number of notes. Ran into problems when testing on Windows:
-- webgl backend is erroring on windows (`passthrough is not supported, GL is disabled`). wasm backend has errors about perf-tools and smt else. node has errors about missing aws-sdk and some other modules...
-  - oh, looks like wasm BE doesn't support USE (according to npmjs.com). wonder if this is still true
-  - trying cpu BE just to test semantic similarity scores with my main corpus of notes (on my win box)
-    - get the same GL is disabled error as with webgl...?
-  - this gpu init error is an issue on electron's GH, recent comments from Sept 2021
-  - other people around the internet are asking about this error. only soln I've seen people report success with is to revert to older version of electron.
-- ok, seems like this webgl error isn't actually blocking creation of embeddings, unless it happens during an embedding?
-  - i started batching the embedding creation, and at around 800 documents it happens. it also happens shortly after I do < 800 embeddings, but doesn't block follow-on embeddings (I can select diff notes, and see their embeddings be created).
-  - what is going on?
+anecdotally: I had a 1mb note, several 100kb notes, and ~800 notes smaller than that, totalling 6mb. the model hung for me when trying to embed all of these in one go. excluding the 1mb note, I could embed everything else in one go just fine.
+
+so, not sure what the actual note size limit is for the model. I tried to have it save intermediate embedding progress to disk, so even if the model hangs, you can restart joplin and it should resume where it left off. but I wasn't able to get this working as I'd expect. it seems like the db INSERTs aren't being committed early enough. you can see the .sqlite file grow in size between each crash, but not as quickly as it should be...
+
+please let me know your system specs and note stats (how big are your largest notes, how many notes do you have, what is your total note size in MB excl. attachments?) if the model crashes for you.
 
 ## Summary
 
 The intent of this plugin is to help the joplin user find notes they have that might be relevant to the one they are editing. We plan to filter out linked notes despite relevancy, as an explicit linking implies the user is already aware of the relevance. This filtering is not yet implemented, however.
 
-Disclaimer: This plugin was written during a 2-week hackathon, without prior javascript or tensorflow experience. PRs more than welcome :)
+Disclaimer: This plugin was written during a 2-week hackathon, without prior javascript or tensorflow experience, and the code quality reflects this. PRs more than welcome :)
+
+### Using
+
+On first startup, this plugin will calculate embeddings for all of your notes. This can take many minutes (less than 10min for my 800 notes totalling several hundred KBs on my desktop computer). It saves these embeddings to disk and loads from there on subsequent startups.
+
+If it hangs/crashes during the initial embeddings computation, try restarting joplin. The plugin should resume where it left off before crashing. it might take many many restarts though, since the code to save these embeddings doesn't work as intended...
 
 ## Semanticness
 
@@ -27,20 +28,24 @@ It might be the case that better results could be achieved with a different mode
 
 ## Caveats/Limitations
 
+- requires internet connection to download the USE model every time. would like to save it locally after first load
+  - ought to improve error messaging around this in the mean time
 - need to recreate the model if # of notes significantly changes
   - would it help to recreate model over time, too, after many things are removed/added?
-- not sure how many notes would be needed to benefit from a different LM (eg BERT)
-- not sure how well this works for smaller # of notes. development was done with a corpus of 800 notes (6mb text)
 - no support for attachments yet
 - not sure if I should be doing preprocessing on the data before creating the embedding.
   - top2vec does preprocessing before it calls USE to create the embedding...
+  - on l2 normalization: https://stackoverflow.com/questions/32276391/feature-normalization-advantage-of-l2-normalization
 
-## Future Work
+## Future Work / Bugfixes
 
-- add option to remove linked notes from results (since they are obv already known/accounted for by user)
+- start initial embedding computation only on user trigger, not automatically
+- remove linked notes from results (since they are obv already known/accounted for by user)
 - setting to exclude specified notebooks from being included (borrow more code from Note Graph UI plugin)
-- save embeddings to disk, so they needn't be recalculated each time joplin starts
-  - at what point is this noticeable? answer: a few hundred notes, or less
+- optimize similarity calculations for more responsive UI
+- save USE model locally, so it needn't be downloaded every time the plugin loads
+- UI webview/panel introduces weird whitespace offset in note editor/renderer
+  - have seen this in some other plugins with webview panels too
 - change UI to look identical to default joplin note list
 - viz note similarities in 2d or 3d
 - optionally include note's tags in the embeddings (test how this changes results per note in practice)
@@ -48,6 +53,7 @@ It might be the case that better results could be achieved with a different mode
 - compare results of USE lite with mobileBERT
 - compare results of USE lite with topic extraction + keyword search
 - summarize each note via some other LM, and show summary blurb in results list, to help user know what's in each similar note
+  - maybe instead allow on-hover previews of the note?
 
 ---
 

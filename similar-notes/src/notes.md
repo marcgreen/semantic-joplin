@@ -58,11 +58,16 @@ tfjs has 'universal sentence encoder' LITE (converted to tsjs GraphModel), which
 
 using dot product for similarity, vs cosine. latter requires the magnitudes to be the same, which is done through data normalization.
 
-webgl backend is erroring on windows (passthrough is not supported, GL is disabled). wasm backend has errors about perf-tools and smt else. node has errors about missing aws-sdk and some other modules...
-- oh, looks like wasm BE doesn't support USE (according to npmjs.com). wonder if this is still true
-- trying cpu BE just to test semantic similarity scores with my main corpus of notes (on my win box)
-  - get the same GL is disabled error as with webgl
-- this gpu init error is an issue on electron's GH, recent comments from Sept 2021
+- webgl backend is erroring on windows (`passthrough is not supported, GL is disabled`). wasm backend has errors about perf-tools and smt else. node has errors about missing aws-sdk and some other modules...
+  - oh, looks like wasm BE doesn't support USE (according to npmjs.com). wonder if this is still true
+  - trying cpu BE just to test semantic similarity scores with my main corpus of notes (on my win box)
+    - get the same GL is disabled error as with webgl...?
+  - this gpu init error is an issue on electron's GH, recent comments from Sept 2021
+  - other people around the internet are asking about this error. only soln I've seen people report success with is to revert to older version of electron.
+- ok, seems like this webgl error isn't actually blocking creation of embeddings, unless it happens during an embedding?
+  - i started batching the embedding creation, and at around 800 documents it happens. it also happens shortly after I do < 800 embeddings, but doesn't block follow-on embeddings (I can select diff notes, and see their embeddings be created).
+  - what is going on?
+- figured out the model was hanging due to 1mb size note.
 
 ## top2vec notes
 
