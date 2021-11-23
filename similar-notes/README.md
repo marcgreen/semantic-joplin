@@ -46,6 +46,9 @@ Testing the model against my own corpus of notes, I am satisified enough with it
 ## Future Work / Bugfixes
 
 - start initial embedding computation only on user trigger, not automatically
+- need to use event queue to re-embed notes that were sync'd from other devices...
+  - save event cursor to disk so we can ensure we don't miss anything
+- when switching between notes quickly, it's not clear list is outdated for a few secs
 - remove linked notes from results (since they are obv already known/accounted for by user)
 - setting to exclude specified notebooks from being included (borrow more code from Note Graph UI plugin)
 - optimize similarity calculations, and when they happen, for more responsive UI
@@ -55,7 +58,6 @@ Testing the model against my own corpus of notes, I am satisified enough with it
 - names of new notes created won't be visible in list until next launch
   - both this and showing deleted notes can be resolved by moving part of
     getAllNoteEmbeddings() into updateSimilarNoteList()
-- when creating new note, main func is called twice, which causes jitter
 - UI webview/panel introduces weird whitespace offset in note editor/renderer
   - have seen this in some other plugins with webview panels too
 - change UI to look identical to default joplin note list

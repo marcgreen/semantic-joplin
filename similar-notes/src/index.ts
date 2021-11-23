@@ -418,6 +418,8 @@ async function updateHTML(panel, html) {
     
     // css overflow-y allows scrolling,
     //   needs height specified so we use 100% of viewport height
+    //   todo this doesn't seem to work for the embedding computation text.
+    //   so maybe vh is heigh of app window, not of webview panel?
     // todo: copy default joplin styling.
     //   (can this be programmatically deteremined?)
     const scrollStyleHTML = `
@@ -607,19 +609,22 @@ joplin.plugins.register({
 	
 	// This event will be triggered when the user selects a different note
 	await joplin.workspace.onNoteSelectionChange(() => {
-	    updateSimilarNoteList('note selection', false);
+	    updateSimilarNoteList('note selection', true);
 	});
 
 	// This event will be triggered when the content of the selected note changes
 	await joplin.workspace.onNoteChange(() => {
-	    updateSimilarNoteList('note change', true);
+	    // commenting this out bc its too distracting to refresh list
+	    // every few keystrokes. let user just switch notes back n forth
+	    // if they want to recompute...
+	    // updateSimilarNoteList('note change', true);
 	});
 
 	// await joplin.settings.onChange( async () => {
 	//     updateSimilarNoteList();
 	// });
 
-	//updateSimilarNoteList('startup');
+	updateSimilarNoteList('startup');
     },
 });
 
