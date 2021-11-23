@@ -2,7 +2,10 @@ import os
 import re
 import sys
 import glob
+import pprint
 import collections
+import umap.plot
+import matplotlib.pyplot as plt
 
 from top2vec import Top2Vec
 
@@ -45,8 +48,7 @@ def main():
     min_count = 1
 
     # smallest size grouping that you wish to consider a cluster
-    min_cluster_size = 5
-
+    min_cluster_size = 2
     # how conservative you want you clustering to be. The larger the value of min_samples you provide, the more conservative the clustering – more points will be declared as noise, and clusters will be restricted to progressively more dense areas
     min_samples = 1
     
@@ -80,7 +82,7 @@ def main():
         # 'cluster_selection_method': 'eom'
         model = Top2Vec(documents, document_ids = titles,
                         embedding_model='universal-sentence-encoder',
-                        # todo could try using tokenizer of ^
+                        use_embedding_model_tokenizer=True, # is this better or worse?
                         workers=8,
                         min_count=min_count,
                         hdbscan_args={
@@ -124,11 +126,6 @@ def main():
                             #         and/or viz the centroid document changing as the
                             #         hierarchy builds up?
                             #
-                            # oh the function get_documents_topics exists lol
-                            #
-                            # use search_documents_by_documents() to impl main idea,
-                            # and filter out ones already linked to it.
-                            # 
                             # could use negative keywords/doc_ids to let user refine
                             # their search as they see irrelevant docs popping up?
                             #
@@ -163,21 +160,51 @@ def main():
     topic_nums, topic_score, topic_words, word_scores = \
         model.get_documents_topics(titles) # todo try num_topics = 5 or 10?
 
-    #import pprint
     #pprint.pprint(topic_nums)
     #pprint.pprint(topic_score)
+
+    # todo get the vec output of top2vec, i think embedding with 512 dimensions with USE?
+    # - input into umap object to conver to 2 dim, and save plot to disk
+    #
+    # The vector dimension should be the same as the vectors in the topic_vectors variable. (i.e. model.topic_vectors.shape[1])
+    # get umap model from model
+    # passing reduced topics to them as the label to color code by
+    # but if i don't call hierarchical_topic_reduction, does this return the normal
+    # doc_top, or null? lemme just use doc_top to see if that works
+    points = umap.plot.points(umap_model, labels=model.doc_top)
+    #fig = plt.figure()
+    #fig.add_subplot(points)
+    #fig 
+    #fig.savefig(f"output/topics-{model_name}.png")
     
-    for i, _ in enumerate(topic_nums):
+    pprint.pprint(points)
+    #chart = umap.plot.points(umap_model, labels=model.doc_top_reduced)
+    # is the data continuous or categorical? i think categorical. but docs can
+    # belong to more than one topic, but that still seems categorical.
+    # save the chart
+    
+    
+    for i in range(len(topic_nums)):
+        # for each document, find semantically similar docs
+        # - consider filtering out docs that are already linked.
+        # - can supply list of doc_ids to search against
+        # - can supply negative doc_ids for dissimilarity
+        _, scores, ids = model.search_documents_by_documents([titles[i]], 5)
         output.append("\n")
         output.append(f"title: {titles[i]}")
+        output.append(f"similar documents:")
+        for i2 in range(len(ids)):
+            output.append(f"  {scores[i2]:.1%}: {ids[i2]}")
+
         output.append(f"topic #{topic_nums[i]} w/ similarity {topic_score[i]:.2%}%")
         output.append(f"words similar to the topic of this document:\n")
         a = [f"{wrd} ({scr:.2%})" for scr, wrd in zip(word_scores[i], topic_words[i])]
+
         output.append(",".join(a))
         #output.append(topic_nums[i])
         pass
         
-
+    
     print("\n".join(output))
     with open(f"output/output-{model_name}", "w") as fh:
         fh.writelines(output)
@@ -191,15 +218,26 @@ if __name__ == '__main__':
 
 # https is the first word of topics 3 and 4 for model 10 30 1. wonder if they are so common because of all the links I have? if so, would like to strip them out (http too)
 # - i think this just shows that the documents in the topics with these as similar words just have a lot of links in them
+# - can i add this as a stop word so the tokenizer would delete it from the corpus?
 
 # i bet many notes could fall under one or more category. or maybe the goal is to find broad enough buckets so that isn't the case?. can i force hierarchical modeling?
 
 # see research Qs above
 
 # is it possible to impl top2vec in js given existing libs, and specifically
-# as a joplin plugin? i'm personally more interested in the reesarch Qs, but
-# feel some obligate to engineer something. if joplin plugin isn't realistic
-# in the time frame, then what is an acceptable alternative UX?
+# as a joplin plugin? if joplin plugin isn't realistic in the time frame,
+# then what is an acceptable alternative UX?
 # - could server REST api via python BE and just have joplin plugin be the FE for it
 # - - this way I could still integrate most similar docs to given doc into UI
-# - - wonder if params above affect document-document similarity search at all? LEFT OFF HERE
+# - - wonder if params above affect document-document similarity search at all?
+# - - - doesn't look like they do
+# - tensorflow.js with node backend looks promising
+#
+# can I find a relationship between:
+# - hierarchical_topic_reduction in these models, and
+# - the model of hierarchical complexity
+# want to viz the hierarchy, can use get_topic_hierarchy
+#
+# interactive plotting sounds really fun and like an effective way to explore the
+# embedding: https://umap-learn.readthedocs.io/en/latest/plotting.html#interactive-plotting-and-hover-tools
+# - TODO create interactive notebook, where user can train new model, or select a model to viz or output info about it
