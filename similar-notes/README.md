@@ -49,6 +49,7 @@ Testing the model against my own corpus of notes, I am satisified enough with it
 - need to use event queue to re-embed notes that were sync'd from other devices...
   - save event cursor to disk so we can ensure we don't miss anything
 - when switching between notes quickly, it's not clear list is outdated for a few secs
+  - need to abort the computation onSelectionChange
 - remove linked notes from results (since they are obv already known/accounted for by user)
 - setting to exclude specified notebooks from being included (borrow more code from Note Graph UI plugin)
 - optimize similarity calculations, and when they happen, for more responsive UI
@@ -58,16 +59,16 @@ Testing the model against my own corpus of notes, I am satisified enough with it
 - names of new notes created won't be visible in list until next launch
   - both this and showing deleted notes can be resolved by moving part of
     getAllNoteEmbeddings() into updateSimilarNoteList()
-- UI webview/panel introduces weird whitespace offset in note editor/renderer
-  - have seen this in some other plugins with webview panels too
+- should recompute onSync, compromising between onSelect and onChange
+- button to show/hide the web panel?
 - change UI to look identical to default joplin note list
-- viz note similarities in 2d or 3d
+- viz note similarities in 2d or 3d - tfjs supports this to some extent
 - optionally include note's tags in the embeddings (test how this changes results per note in practice)
 - - see gensim impl here: https://medium.com/wisio/a-gentle-introduction-to-doc2vec-db3e8c0cce5e
 - compare results of USE lite with mobileBERT
 - compare results of USE lite with topic extraction + keyword search
 - summarize each note via some other LM, and show summary blurb in results list, to help user know what's in each similar note
-  - maybe instead allow on-hover previews of the note?
+  - maybe instead allow on-hover previews of the note? or on-hover/button summarizations/outline
 - wonder what results would be if we calculated similarity of multiple selected notes
   (using onSelectedNoteIds event). could average the selected note embeddings
 
