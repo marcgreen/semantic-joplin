@@ -33,7 +33,8 @@ Because we're using a dense neural network, computation of the embeddings is rel
 
 ## Caveats/Limitations
 
-- requires internet connection to download the USE model every time. would like to save it locally after first download
+- english only, and USE lite has 'only' an 8000 word vocabulary
+- requires internet connection to download the USE model every startup. would like to save it locally after first download
 - no support for attachments yet
 
 ## Future Work / Bugfixes
@@ -66,7 +67,7 @@ Because we're using a dense neural network, computation of the embeddings is rel
 ## Questions
 
 - not sure if I should be doing preprocessing on the data before creating the embedding?
-  - some documentation says I should, but the official examples of USE in tfjs don't. maybe tf vs tfjs thing?
+  - some documentation says I should (sentencepiece), but the official examples of USE in tfjs don't. maybe tf vs tfjs thing?
   - top2vec does preprocessing before it calls USE to create the embedding...
   - on l2 normalization: https://stackoverflow.com/questions/32276391/feature-normalization-advantage-of-l2-normalization
 - USE embeddings are deterministic, right? don't need to recalc embeddings like top2vec suggests? (maybe that's only for top2vec algo, not USE within top2vec?)
