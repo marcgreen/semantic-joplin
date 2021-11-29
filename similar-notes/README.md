@@ -72,6 +72,10 @@ Because we're using a dense neural network, computation of the embeddings is rel
   - on l2 normalization: https://stackoverflow.com/questions/32276391/feature-normalization-advantage-of-l2-normalization
 - USE embeddings are deterministic, right? don't need to recalc embeddings like top2vec suggests? (maybe that's only for top2vec algo, not USE within top2vec?)
 
+## Licenses
+
+This plugin's source code is MIT licensed. Tensorflow,js is Apache 2.0 (their license is included in the .jpl)
+
 ---
 
 # Joplin Plugin
