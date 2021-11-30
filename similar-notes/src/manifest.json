@@ -6,7 +6,7 @@
     "name": "Semantically Similar Notes",
     "description": "Show user which notes are semantically similar to the one they are looking at",
     "author": "marc green",
-    "homepage_url": "",
+    "homepage_url": "https://github.com/marcgreen/semantic-joplin/tree/master/similar-notes",
     "repository_url": "https://github.com/marcgreen/semantic-joplin/similar-notes",
     "keywords": ["semantic", "similarity"]
 }
