@@ -23,7 +23,6 @@ Tf.enableProdMode(); // not sure the extent to which this helps
 // - manually test some edge cases?
 // - UI issue that offsets note editor and renderer when width is made smaller
 //   (I've seen this in other plugins too)
-// - publish plugin (how?)
 // - compare semantic similarity results with full USE model, vs this USE lite model
 
 function openDB(embeddingsDBPath) {
