@@ -13,7 +13,7 @@ enum TFJS_BACKEND_ENUM {
 export async function registerSettings() {
   const sectionName = "semantically-similar.settings"
   await joplin.settings.registerSection(sectionName, {
-    label: 'Semantically Similar',
+    label: 'Semantically Similar Notes',
     // Check out https://forkaweso.me/Fork-Awesome/icons/ for available icons.
     iconName: 'fas fa-lightbulb'
   });
@@ -25,8 +25,8 @@ export async function registerSettings() {
       section: sectionName,
       isEnum: true,
       public: true,
-      label: 'Tensorflow Backend (restart)',
-      description: 'WebGL can be like 25-50x faster than CPU.',
+      label: 'Tensorflow Backend',
+      description: 'WebGL can be like 25-50x faster than CPU. Needs restart to affect initial embedding computation.',
 
       // todo use enum keys, too?
       options: { 
@@ -40,7 +40,7 @@ export async function registerSettings() {
 	section: sectionName,
       public: true,
       label: 'Model Batch Size (restart)',
-      description: '# notes in input to model at one time. Really only affects speed of initial embeddings computation.'
+      description: '# notes in input to model at one time. Really only affects speed of initial embeddings computation. Restart after changing.'
     }
   });
 }

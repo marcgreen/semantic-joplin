@@ -2,6 +2,9 @@ import joplin from 'api';
 import * as joplinData from './data';
 import * as joplinSettings from './settings';
 
+const Log = require('electron-log')
+//Object.assign(console, Log.functions);
+
 const Sqlite3 = joplin.plugins.require('sqlite3').verbose();
 const Fs = joplin.plugins.require('fs-extra');
 const Path = require('path');
@@ -34,7 +37,7 @@ function openDB(embeddingsDBPath) {
 	    //return null;
 	    throw err;
 	} else {
-	    console.log('Connected to embeddings db at ', embeddingsDBPath);
+	    Log.log('Connected to embeddings db at ', embeddingsDBPath);
 	}
     });
     
@@ -48,7 +51,7 @@ function deleteEmbedding(db, noteID) {
 }
 
 async function loadEmbeddings(db) {
-    console.log('loading embeddings');
+    Log.log('loading embeddings');
     //    let prom = null;
     let notes = new Map();
     let stmt = null;
@@ -281,7 +284,7 @@ async function getAllNoteEmbeddings(model, db, panel) {
     //   based on what was loaded
     const savedEmbeddings = await loadEmbeddings(db);     // map of noteID to 512dim array
     const knownIDs = [...savedEmbeddings.keys()];
-    console.info('savedEmbeddings:', savedEmbeddings);
+    console.log('savedEmbeddings:', savedEmbeddings);
     const unembeddedIDs = allNoteIDs.filter(id => !knownIDs.includes(id));
     let remainingNotes = new Map();
     for (const nid of unembeddedIDs) {
@@ -291,7 +294,7 @@ async function getAllNoteEmbeddings(model, db, panel) {
     // todo use event queue to handle this better
     // delete notes from DB that are no longer in joplin proper
     const deletedIDs = knownIDs.filter(id => !allNoteIDs.includes(id));
-    console.info('notes to delete from db: ', deletedIDs);
+    console.log('note embeddings to delete from db: ', deletedIDs);
     for (const nid of deletedIDs) {
 	deleteEmbedding(db, nid);
 	savedEmbeddings.delete(nid);
@@ -303,13 +306,13 @@ async function getAllNoteEmbeddings(model, db, panel) {
 
     // process the remaining notes
     const remaining_documents = notes2docs(remainingNotes.values());
-    console.log('creating embeddings');
+    Log.log('creating embeddings');
     //const tensors = await model.embed(['test']);
     let embeddings = [];
     const batch_size = Math.max(1, await joplin.settings.value('SETTING_BATCH_SIZE'));
     const num_batches = Math.floor(remaining_documents.length/batch_size);
     const remaining = remaining_documents.length % batch_size;
-    console.info('batches to run ', num_batches, ' ', remaining);
+    Log.log('batches to run ', num_batches, ' ', remaining);
 
     progressHTML += `<br /><br />Batch Size: ${batch_size} notes`;
     progressHTML += `<br /># full batches: ${num_batches}`;
@@ -321,13 +324,13 @@ async function getAllNoteEmbeddings(model, db, panel) {
 
 	//const model = await Use.load();
 	//Tf.engine().startScope();
-	console.log('embedding batch:', slice)
+	Log.log('embedding batch:', slice.map(n => n.substr(0,100)));
 	let tensors: Tf.Tensor = null;
 	try {
 	    tensors = await model.embed(slice);
 	} catch (err) {
-	    console.error('err embedding batch: ', err);
-	    console.log('moving to the next batch');
+	    Log.error('err embedding batch: ', err);
+	    Log.log('moving to the next batch');
 	    return embeddings;
 	}
 	//console.log(tensors)
@@ -373,7 +376,8 @@ async function getAllNoteEmbeddings(model, db, panel) {
 	embeddings = embeddings.concat(e);
 	//console.log('done ', i);
 
-	console.log('finished batch ' + i, execTime + ' seconds elapsed', Tf.memory(), Tf.engine(), Tf.env());
+	Log.log('finished batch ' + i, execTime + ' seconds elapsed');
+	console.log(Tf.memory(), Tf.engine(), Tf.env());
 
 	progressHTML += `<br />Finished batch ${i+1} in ${execTime} seconds`;
 	await updateHTML(panel, progressHTML);
@@ -471,9 +475,10 @@ async function updateHTML(panel, html) {
 // what about other batch var?
 
 // done
-// need to enable log messages to find which note is causing hang-up
 // tfjs backend setting
 // - include model batch size setting
+// need to enable log messages to find which note is causing hang-up
+// - backlinks does it by being a content script.
 
 joplin.plugins.register({
     onStart: async function() {
@@ -481,13 +486,13 @@ joplin.plugins.register({
 	joplin.settings.onChange(async () => {
 	    const tfjsBackend = await joplinSettings.getSelectedBackend();
 	    Tf.setBackend(tfjsBackend);
-	    console.log('tensorflow backend: ', Tf.getBackend());
+	    Log.log('tensorflow backend: ', Tf.getBackend());
 	})
 	
 	const tfjsBackend = await joplinSettings.getSelectedBackend();
 	Tf.setBackend(tfjsBackend);
 	await Tf.ready(); // any perf issue of keeping this in prod code?
-	console.log('tensorflow backend: ', Tf.getBackend());
+	Log.log('tensorflow backend: ', Tf.getBackend());
 	//console.log(Tf.memory())
 
 	const selectNotePromptHTML = '<br /><i><center>Select a note to see similar notes</center></i>'
@@ -500,7 +505,7 @@ joplin.plugins.register({
 
 	const pluginDir = await joplin.plugins.dataDir();
 	const embeddingsDBPath = Path.join(pluginDir, 'embeddings.sqlite');
-	console.log('Checking if "' + pluginDir + '" exists:', await Fs.pathExists(pluginDir));
+	Log.log('Checking if "' + pluginDir + '" exists:', await Fs.pathExists(pluginDir));
 
 	const db = openDB(embeddingsDBPath);
 
