@@ -1,4 +1,7 @@
 import joplin from 'api';
+import * as joplinData from './data';
+import * as joplinSettings from './settings';
+
 const Sqlite3 = joplin.plugins.require('sqlite3').verbose();
 const Fs = joplin.plugins.require('fs-extra');
 const Path = require('path');
@@ -10,8 +13,6 @@ const Use = require('@tensorflow-models/universal-sentence-encoder');
 Tf.enableProdMode(); // not sure the extent to which this helps
 //Tf.ENV.set('WEBGL_NUM_MB_BEFORE_PAGING', 4000);
 //console.log(Tf.memory())
-
-//Tf.setBackend('cpu');
 
 // partial todo list
 // - optimize if necessary (don't unstack tensors, *Sync() to *(), fix all await/async/promises)
@@ -43,11 +44,11 @@ function openDB(embeddingsDBPath) {
 function deleteEmbedding(db, noteID) {
     const stmt = db.prepare("DELETE FROM note_embeddings WHERE note_id = ?");
     stmt.run(noteID).finalize();
-    console.info('deleted ' + noteID);
+    //console.log('deleted ' + noteID);
 }
 
 async function loadEmbeddings(db) {
-    console.info('loading embeddings');
+    console.log('loading embeddings');
     //    let prom = null;
     let notes = new Map();
     let stmt = null;
@@ -55,7 +56,7 @@ async function loadEmbeddings(db) {
 	db.run("CREATE TABLE IF NOT EXISTS note_embeddings (note_id TEXT PRIMARY KEY, embedding TEXT);");
 	//, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);");
 
-	console.info('table exists');
+	//console.log('table exists');
 	
 	stmt = db.prepare("SELECT note_id, embedding FROM note_embeddings");
     });
@@ -130,42 +131,44 @@ function saveEmbeddings(db, idSlice, embeddings) {
 //     // otherwise, download from tfhub and save it to disk
 // }
 
-interface Note {
-    id: string;
-    parent_id: string;
-    title: string;
-    body: string;
-    embedding: Array<number>;
-    // we also shim in a score attribute...
-}
+// interface Note {
+//     id: string;
+//     parent_id: string;
+//     title: string;
+//     body: string;
+//     embedding: Array<number>;
+//     // we also shim in a score attribute...
+// }
+
 
 // code borrowed from joplin link graph plugin
-async function getAllNotes(): Promise<Map<string, Note>> {
-    var allNotes = []
-    var page_num = 1;
-    do {
-	// `parent_id` is the ID of the notebook containing the note.
-	var notes = await joplin.data.get(['notes'], {
-	    fields: ['id', 'parent_id', 'title', 'body'],
-	    // for semantic similarity, updated_time seems like an irrelevant ordering.
-	    // maybe, extract top keywords from current note, FTS those, order by...relevancy?
-	    // - just a potential optimization to display semantically similar notes faster.
-	    //   not actually sure how long takes to getAllNotes in practice.
-	    order_by: 'updated_time',
-	    order_dir: 'DESC',
-	    limit: 100,
-	    page: page_num,
-	});
-	allNotes.push(...notes.items);
-	page_num++;
-    } while (notes.has_more)
+// async function pageNotes(computation: , withBodies: Boolean): Promise<Map<string, Note>> {
+//     var allNotes = []
+//     var page_num = 1;
+//     do {
+// 	// `parent_id` is the ID of the notebook containing the note.
+// 	var notes = await joplin.data.get(['notes'], {
+// 	    fields: withBodies
+// 		? ['id', 'parent_id', 'title', 'body']
+// 		: ['id', 'parent_id', 'title']
 
-    const noteMap = new Map();
-    for (const note of allNotes) {
-	noteMap.set(note.id, {id: note.id, title: note.title, parent_id: note.parent_id, body: note.body})
-    }
-    return noteMap;
-}
+// 	    order_by: 'updated_time',
+// 	    order_dir: 'DESC',
+// 	    limit: 100,
+// 	    page: page_num,
+// 	});
+// 	allNotes.push(...notes.items);
+// 	page_num++;
+//     } while (notes.has_more)
+
+//     const noteMap = new Map();
+//     for (const note of allNotes) {
+// 	noteDict = withBodies
+// 	    ? {id: note.id, title: note.title, parent_id: note.parent_id, body: note.body}
+// 	noteMap.set(note.id, noteDict)
+//     }
+//     return noteMap;
+// }
 
 // consider looking at how doc2vec impls this for optimization inspo
 function search_similar_embeddings(embedding, notes) {
@@ -252,7 +255,7 @@ function search_similar_embeddings(embedding, notes) {
 
 }
 function notes2docs(notes) {
-    //console.log('notes: ', notes);
+    console.log('notes: ', notes);
     let docs = [];
     for (const n of notes) {
 	//docs.push(n.title);
@@ -265,7 +268,7 @@ async function getAllNoteEmbeddings(model, db, panel) {
     let progressHTML = '<center><i>Computing/loading embeddings</i></center>';
     await updateHTML(panel, progressHTML);
     
-    const allNotes = await getAllNotes();
+    const allNotes = await joplinData.getAllNotes();
     const allNoteIDs = [...allNotes.keys()];
 
     progressHTML += `<br /><br />Total # notes: ${allNoteIDs.length}`;
@@ -300,10 +303,10 @@ async function getAllNoteEmbeddings(model, db, panel) {
 
     // process the remaining notes
     const remaining_documents = notes2docs(remainingNotes.values());
-    console.info('creating embeddings');
+    console.log('creating embeddings');
     //const tensors = await model.embed(['test']);
     let embeddings = [];
-    const batch_size = 100;
+    const batch_size = Math.max(1, await joplin.settings.value('SETTING_BATCH_SIZE'));
     const num_batches = Math.floor(remaining_documents.length/batch_size);
     const remaining = remaining_documents.length % batch_size;
     console.info('batches to run ', num_batches, ' ', remaining);
@@ -314,9 +317,19 @@ async function getAllNoteEmbeddings(model, db, panel) {
     await updateHTML(panel, progressHTML);
     
     async function embed_batch(db, idSlice, slice) {
+	let embeddings = [];
+
 	//const model = await Use.load();
 	//Tf.engine().startScope();
-	const tensors = await model.embed(slice);
+	console.log('embedding batch:', slice)
+	let tensors: Tf.Tensor = null;
+	try {
+	    tensors = await model.embed(slice);
+	} catch (err) {
+	    console.error('err embedding batch: ', err);
+	    console.log('moving to the next batch');
+	    return embeddings;
+	}
 	//console.log(tensors)
 
 	// prob don't want to do this for optimization reasons?
@@ -324,7 +337,6 @@ async function getAllNoteEmbeddings(model, db, panel) {
 	// or maybe we want to untensorize them asap and dispose the tensors?
 	const tensors_array = Tf.unstack(tensors);
 	//console.log(tensors_array);
-	let embeddings = [];
 	for (const t of tensors_array) {
 	    const a = t.arraySync(); // TODO why doesn't this need [0] but other arraySyncs do?
 	    //console.log(t, a);
@@ -361,7 +373,7 @@ async function getAllNoteEmbeddings(model, db, panel) {
 	embeddings = embeddings.concat(e);
 	//console.log('done ', i);
 
-	console.info('batch ' + i, Tf.memory(), Tf.engine(), Tf.env());
+	console.log('finished batch ' + i, execTime + ' seconds elapsed', Tf.memory(), Tf.engine(), Tf.env());
 
 	progressHTML += `<br />Finished batch ${i+1} in ${execTime} seconds`;
 	await updateHTML(panel, progressHTML);
@@ -453,12 +465,30 @@ async function updateHTML(panel, html) {
 				             `</div>`);
 }
 
+// todo
+// out of core compute and load embeddings
+// - await async and try/catch skip the problem notes
+// what about other batch var?
+
+// done
+// need to enable log messages to find which note is causing hang-up
+// tfjs backend setting
+// - include model batch size setting
+
 joplin.plugins.register({
     onStart: async function() {
+	await joplinSettings.registerSettings();
+	joplin.settings.onChange(async () => {
+	    const tfjsBackend = await joplinSettings.getSelectedBackend();
+	    Tf.setBackend(tfjsBackend);
+	    console.log('tensorflow backend: ', Tf.getBackend());
+	})
+	
+	const tfjsBackend = await joplinSettings.getSelectedBackend();
+	Tf.setBackend(tfjsBackend);
 	await Tf.ready(); // any perf issue of keeping this in prod code?
-	console.info('tensorflow backend: ', Tf.getBackend());
+	console.log('tensorflow backend: ', Tf.getBackend());
 	//console.log(Tf.memory())
-
 
 	const selectNotePromptHTML = '<br /><i><center>Select a note to see similar notes</center></i>'
 
@@ -470,7 +500,7 @@ joplin.plugins.register({
 
 	const pluginDir = await joplin.plugins.dataDir();
 	const embeddingsDBPath = Path.join(pluginDir, 'embeddings.sqlite');
-	console.info('Checking if "' + pluginDir + '" exists:', await Fs.pathExists(pluginDir));
+	console.log('Checking if "' + pluginDir + '" exists:', await Fs.pathExists(pluginDir));
 
 	const db = openDB(embeddingsDBPath);
 
@@ -489,8 +519,8 @@ joplin.plugins.register({
 
 	await updateHTML(panel, '<center><i>Downloading model from Tensorflow Hub</i></center>')
 	const model = await Use.load();
-	console.info(Tf.memory())
-	console.info(model);
+	console.log(Tf.memory())
+	console.log(model);
 	
 	// not sure what i'm doing with this async/await stuff...
 	// think I ought to rethink the design around this
@@ -499,6 +529,7 @@ joplin.plugins.register({
 	// todo move part of this function inside updateSimilarNoteList
 	//  so that new note title names are accurate. but don't want to relaod
 	//  everything from DB
+	// todo: don't include body in this list
 
 	await updateHTML(panel, selectNotePromptHTML);
 
@@ -511,13 +542,13 @@ joplin.plugins.register({
 	//   and display them in sorted order in the WebView
 	// todo could conditionally recompute similarities, too
 	async function updateSimilarNoteList(updateType: string, reEmbed: boolean) {
-	    console.info('updating bc: ', updateType)
+	    console.log('updating bc: ', updateType)
 	    // Get the current note from the workspace.
 	    const note = await joplin.workspace.selectedNote();
 
 	    // Keep in mind that it can be `null` if nothing is currently selected!
 	    if (note) {
-		console.info('selected note title:\n', note.title);
+		console.log('selected note title:\n', note.title);
 
 		await updateHTML(panel, 'Computing similarities...');
 
@@ -530,7 +561,8 @@ joplin.plugins.register({
 		    reEmbed = true;
 		    noteObj = {id: note.id, title: note.title,
 			       parent_id: note.parent_id, body: note.body,
-			       embedding: null // will be set in a sec
+			       embedding: null, // will be set in a sec
+			       relative_score: null // will be set in a sec
 			      }
 		}
 		    
