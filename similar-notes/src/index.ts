@@ -1,21 +1,17 @@
 import joplin from 'api';
+import * as Ui from './ui';
+import * as Lm from './lm';
+import * as Db from './db';
 import * as joplinData from './data';
 import * as joplinSettings from './settings';
 
 const Log = require('electron-log')
 //Object.assign(console, Log.functions);
 
-const Sqlite3 = joplin.plugins.require('sqlite3').verbose();
 const Fs = joplin.plugins.require('fs-extra');
 const Path = require('path');
 
-//const Tf = require('@tensorflow/tfjs');
-import * as Tf from '@tensorflow/tfjs';
-const Use = require('@tensorflow-models/universal-sentence-encoder');
-
-Tf.enableProdMode(); // not sure the extent to which this helps
-//Tf.ENV.set('WEBGL_NUM_MB_BEFORE_PAGING', 4000);
-//console.log(Tf.memory())
+Lm.enableProd();
 
 // partial todo list
 // - optimize if necessary (don't unstack tensors, *Sync() to *(), fix all await/async/promises)
@@ -25,86 +21,8 @@ Tf.enableProdMode(); // not sure the extent to which this helps
 // - clean things up
 // - - probably some large refactors doable, now that I understand flow better
 // - manually test some edge cases?
-// - UI issue that offsets note editor and renderer when width is made smaller
-//   (I've seen this in other plugins too)
 // - compare semantic similarity results with full USE model, vs this USE lite model
 
-function openDB(embeddingsDBPath) {
-    let db = new Sqlite3.Database(embeddingsDBPath, (err) => {
-	if (err) {
-	    console.error(err.message);
-	    // TODO what to do for main plugin logic? throw exception? return null?
-	    //return null;
-	    throw err;
-	} else {
-	    Log.log('Connected to embeddings db at ', embeddingsDBPath);
-	}
-    });
-    
-    return db;
-}
-
-function deleteEmbedding(db, noteID) {
-    const stmt = db.prepare("DELETE FROM note_embeddings WHERE note_id = ?");
-    stmt.run(noteID).finalize();
-    //console.log('deleted ' + noteID);
-}
-
-async function loadEmbeddings(db) {
-    Log.log('loading embeddings');
-    //    let prom = null;
-    let notes = new Map();
-    let stmt = null;
-    db.serialize(function() {
-	db.run("CREATE TABLE IF NOT EXISTS note_embeddings (note_id TEXT PRIMARY KEY, embedding TEXT);");
-	//, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);");
-
-	//console.log('table exists');
-	
-	stmt = db.prepare("SELECT note_id, embedding FROM note_embeddings");
-    });
-
-    // sqlite3 doesn't use await/async, so we make our own
-    const rows: Array<object> = await new Promise((resolve, reject) => {
-	stmt.all(function(err, rows) {
-	    if (err) { reject(err); }
-	    resolve(rows);
-	});
-	stmt.finalize();
-    }); // todo throw error on reject
-
-    // console.log('rows', rows);
-    for (const row of rows) {
-	notes.set(row['note_id'], {id: row['note_id'], embedding: row['embedding'].split(" ").map(x => parseFloat(x))});
-    }
-    
-    //prom = new Promise(function (resolve, reject) {resolve(notes)});
-    //    let notes = await prom;
-    //console.log('loading notes', [...notes.entries()]);
-    return notes;
-    //db.close();
-}
-
-function saveEmbeddings(db, idSlice, embeddings) {
-    //console.info('saving', idSlice, embeddings);
-    db.serialize(async function() {
-	let stmt = db.prepare("INSERT INTO note_embeddings (note_id, embedding) VALUES (?,?) ON CONFLICT(note_id) DO UPDATE SET embedding = excluded.embedding");
-
-	// this promise isn't doing what i want. want to essentially force db commit to happen
-	// bc otherwise model crashes the program before things get written... TODO
-	await new Promise((resolve, reject) => {
-	    for (var i = 0; i < idSlice.length; i++) {
-		//console.log(idSlice[i].toString(), ' and ', embeddings[i].join(" "));
-		stmt.run(idSlice[i].toString(), embeddings[i].join(" "));
-	    }
-
-	    stmt.finalize();
-	    resolve();
-	});
-	
-	console.info('to db', stmt, idSlice, embeddings);
-    });
-}
 
 
 // async function loadEmbeddings() {
@@ -128,135 +46,6 @@ function saveEmbeddings(db, idSlice, embeddings) {
 //     }
 // }
 
-// async function loadModel() {
-//     // if we already have it saved from disk, load from there
-// python ref, but mb helpful: https://stackoverflow.com/questions/69949405/save-and-load-universal-sentence-encoder-model-on-different-machines
-//     // otherwise, download from tfhub and save it to disk
-// }
-
-// interface Note {
-//     id: string;
-//     parent_id: string;
-//     title: string;
-//     body: string;
-//     embedding: Array<number>;
-//     // we also shim in a score attribute...
-// }
-
-
-// code borrowed from joplin link graph plugin
-// async function pageNotes(computation: , withBodies: Boolean): Promise<Map<string, Note>> {
-//     var allNotes = []
-//     var page_num = 1;
-//     do {
-// 	// `parent_id` is the ID of the notebook containing the note.
-// 	var notes = await joplin.data.get(['notes'], {
-// 	    fields: withBodies
-// 		? ['id', 'parent_id', 'title', 'body']
-// 		: ['id', 'parent_id', 'title']
-
-// 	    order_by: 'updated_time',
-// 	    order_dir: 'DESC',
-// 	    limit: 100,
-// 	    page: page_num,
-// 	});
-// 	allNotes.push(...notes.items);
-// 	page_num++;
-//     } while (notes.has_more)
-
-//     const noteMap = new Map();
-//     for (const note of allNotes) {
-// 	noteDict = withBodies
-// 	    ? {id: note.id, title: note.title, parent_id: note.parent_id, body: note.body}
-// 	noteMap.set(note.id, noteDict)
-//     }
-//     return noteMap;
-// }
-
-// consider looking at how doc2vec impls this for optimization inspo
-function search_similar_embeddings(embedding, notes) {
-    // tensor is 1x512
-    // tensors is Nx512 where N = # notes
-    
-    // top2vec's impl in python for 1 to many string similarity search
-    //ranks = np.inner(vectors, vector)
-    //indexes = np.flip(np.argsort(ranks)[-num_res:])
-    //scores = np.array([ranks[res] for res in indexes])
-    //return indexes, scores
-
-    // this is equiv of np.inner
-    // todo why does official tf USE readme not use Tf.dot?
-    let scores = [];
-    let ids = [];
-    //const num_tensors = tensors.arraySync()[0].length
-    //Tf.unstack(tensors).forEach(t => t.print(true));
-    // todo extend tensor to same dim as tensors, and do mult in 1 op, vs forEach
-    //const flipped = Tf.transpose(tensor);
-    //Tf.unstack(tensors).forEach(t => scores.push(Tf.dot(tensor, t)));
-
-    //console.log(ts.length)
-    //console.log(notes);
-    //console.log(embedding); // this prints a 512dim even after gpu_init error
-    const tensor1 = Tf.tensor1d(embedding);
-    //let i = 0;
-    for (const [id, n] of notes.entries()) {
-	//console.log(i, id, n);
-	//i += 1;
-	const tensor2: Tf.Tensor = Tf.tensor1d(n.embedding);
-	const x = Tf.dot(tensor1, tensor2.transpose());
-	const y = x.dataSync();
-	const score = y[0]; // returned as single element list, hence [0]
-	//console.log(score);
-
-	tensor2.dispose();
-	x.dispose();
-	//tensor.print(true);
-	//t.print(true);
-	//score.print(true);
-	//console.log(score.dataSync()); // not a tensor, just an array32Float
-	//console.log(parseFloat(score.dataSync())); // normal js float
-	ids.push(id);
-	scores.push(score);
-    }
-    tensor1.dispose();
-    // for (let i = 0; i < num_tensors; i++) {
-    // 	console.info('dotting ', tensor, ' and ', tensors[i]);
-    // 	scores.push(Tf.dot(tensor, tensors[i]));
-    // 	//scores.push(dotProduct(tensor, tensors[i]));
-    // }
-    // for (const t of scores) {
-    // 	t.print();
-    // }
-    
-    const {values, indices} = Tf.topk(scores, scores.length);
-//    const syncedIndices: Array<number> = Array.from(indices.arraySync());
-    // console.log(indices);
-    // console.log(syncedIndices);
-    // for (const i of indices) {
-    //  	i.print();
-    // }
-
-    //values.print();
-    //indices.print();
-
-    //    const ia: Array<number> = Array.from([indices.arraySync()]);
-    const ia = indices.arraySync();
-    const syncdValues = values.arraySync();
-    
-    let sorted_note_ids: Array<number> = [];
-    for (let i = 0; i < notes.size; i++) {
-	const id_index = ia[i];
-	sorted_note_ids.push(ids[id_index]);
-    }
-    
-
-    values.dispose();
-    indices.dispose();
-    
-    return [sorted_note_ids, syncdValues];
-    
-
-}
 function notes2docs(notes) {
     console.log('notes: ', notes);
     let docs = [];
@@ -269,20 +58,20 @@ function notes2docs(notes) {
 
 async function getAllNoteEmbeddings(model, db, panel) {
     let progressHTML = '<center><i>Computing/loading embeddings</i></center>';
-    await updateHTML(panel, progressHTML);
+    await Ui.updateHTML(panel, progressHTML);
     
     const allNotes = await joplinData.getAllNotes();
     const allNoteIDs = [...allNotes.keys()];
 
     progressHTML += `<br /><br />Total # notes: ${allNoteIDs.length}`;
-    await updateHTML(panel, progressHTML);
+    await Ui.updateHTML(panel, progressHTML);
     
     // try loading saved embeddings first
     // determine which notes don't yet have embeddings, compute and save those
 
     // split the remaining notes needing to be embedded from allNotes,
     //   based on what was loaded
-    const savedEmbeddings = await loadEmbeddings(db);     // map of noteID to 512dim array
+    const savedEmbeddings = await Db.loadEmbeddings(db);     // map of noteID to 512dim array
     const knownIDs = [...savedEmbeddings.keys()];
     console.log('savedEmbeddings:', savedEmbeddings);
     const unembeddedIDs = allNoteIDs.filter(id => !knownIDs.includes(id));
@@ -296,13 +85,13 @@ async function getAllNoteEmbeddings(model, db, panel) {
     const deletedIDs = knownIDs.filter(id => !allNoteIDs.includes(id));
     console.log('note embeddings to delete from db: ', deletedIDs);
     for (const nid of deletedIDs) {
-	deleteEmbedding(db, nid);
+	Db.deleteEmbedding(db, nid);
 	savedEmbeddings.delete(nid);
     }
 
     progressHTML += `<br />Saved # embeddings: ${knownIDs.length}`;
     progressHTML += `<br />Remaining # embeddings: ${unembeddedIDs.length}`;
-    await updateHTML(panel, progressHTML);
+    await Ui.updateHTML(panel, progressHTML);
 
     // process the remaining notes
     const remaining_documents = notes2docs(remainingNotes.values());
@@ -317,50 +106,8 @@ async function getAllNoteEmbeddings(model, db, panel) {
     progressHTML += `<br /><br />Batch Size: ${batch_size} notes`;
     progressHTML += `<br /># full batches: ${num_batches}`;
     progressHTML += `<br /># notes in final partial batch: ${remaining}`;
-    await updateHTML(panel, progressHTML);
+    await Ui.updateHTML(panel, progressHTML);
     
-    async function embed_batch(db, idSlice, slice) {
-	let embeddings = [];
-
-	//const model = await Use.load();
-	//Tf.engine().startScope();
-	Log.log('embedding batch:', slice.map(n => n.substr(0,100)));
-	let tensors: Tf.Tensor = null;
-	try {
-	    tensors = await model.embed(slice);
-	} catch (err) {
-	    Log.error('err embedding batch: ', err);
-	    Log.log('moving to the next batch');
-	    return embeddings;
-	}
-	//console.log(tensors)
-
-	// prob don't want to do this for optimization reasons?
-	// (prob faster to compute simlarity all in one go, vs iteratively for each tensor)
-	// or maybe we want to untensorize them asap and dispose the tensors?
-	const tensors_array = Tf.unstack(tensors);
-	//console.log(tensors_array);
-	for (const t of tensors_array) {
-	    const a = t.arraySync(); // TODO why doesn't this need [0] but other arraySyncs do?
-	    //console.log(t, a);
-	    embeddings.push(a); 
-	    t.dispose();
-	}
-	tensors.dispose();
-	//Tf.disposeVariables(); // don't think we use any vars but just trying things
-	//Tf.engine().endScope();
-	//model.dispose(); //this causes things to hang for some reason
-	//	model.reset_default_graph();
-	//model.layers.forEach(l => l.dispose());
-
-	// originally designed this way to accommodate model crashing on large input, 
-	// but didn't end up figuring out how to force commit to DB before moving on,
-	// so ought to be refactored...
-	saveEmbeddings(db, idSlice, embeddings);
-	
-	return embeddings;
-	// todo try tf.profile to understand model issue
-    }
 
     progressHTML += "<br />";
     for (let i = 0; i < num_batches; i++) {
@@ -369,7 +116,12 @@ async function getAllNoteEmbeddings(model, db, panel) {
 	
 	//console.log(i, slice);
 	let startTime = new Date().getTime();
-	const e = await embed_batch(db, idSlice, slice);
+	const e = await Lm.embed_batch(model, slice);
+	// originally designed this way to accommodate model crashing on large input, 
+	// but didn't end up figuring out how to force commit to DB before moving on,
+	// so ought to be refactored...
+	Db.saveEmbeddings(db, idSlice, e);
+
 	let endTime = new Date().getTime();
 	let execTime = (endTime - startTime)/1000;
 	//console.log('e: ', e)
@@ -377,20 +129,21 @@ async function getAllNoteEmbeddings(model, db, panel) {
 	//console.log('done ', i);
 
 	Log.log('finished batch ' + i, execTime + ' seconds elapsed');
-	console.log(Tf.memory(), Tf.engine(), Tf.env());
+	//console.log(Tf.memory(), Tf.engine(), Tf.env());
 
 	progressHTML += `<br />Finished batch ${i+1} in ${execTime} seconds`;
-	await updateHTML(panel, progressHTML);
+	await Ui.updateHTML(panel, progressHTML);
     }
     if (remaining > 0) {
 	const slice = remaining_documents.slice(num_batches*batch_size);
 	const idSlice = unembeddedIDs.slice(num_batches*batch_size);
 	//console.log(slice);
-	const e = await embed_batch(db, idSlice, slice);
+	const e = await Lm.embed_batch(model, slice);
+	Db.saveEmbeddings(db, idSlice, e);
 	embeddings = embeddings.concat(e);
 	
 	progressHTML += `<br />Finished final batch`;
-	await updateHTML(panel, progressHTML);
+	await Ui.updateHTML(panel, progressHTML);
     }
     //const tensors = await model.embed(remaining_documents);
     //console.log('created', num_batches, ' ', remaining);
@@ -422,51 +175,11 @@ async function getAllNoteEmbeddings(model, db, panel) {
     return allNotes;
 }
 
-// borrowed from backlinks plugin: https://github.com/ambrt/joplin-plugin-referencing-notes/blob/master/src/index.ts
-function escapeTitleText(text: string) {
-    return text.replace(/(\[|\])/g, '\\$1');
-}
 
-// always keep title+scroll in html
-async function updateHTML(panel, html) {
-    const titleHTML = '<h3>Semantically Similar Notes</h3>';
-    
-    // css overflow-y allows scrolling,
-    //   needs height specified so we use 100% of viewport height
-    //   todo this doesn't seem to work for the embedding computation text.
-    //   so maybe vh is heigh of app window, not of webview panel?
-    // todo: copy default joplin styling.
-    //   (can this be programmatically deteremined?)
-    const scrollStyleHTML = `
-    		<style>
-		.scroll_enabled {
-		    overflow-y: auto;
-		    max-height: 100vh;
-		}
-		.scroll_enabled::-webkit-scrollbar {
-		    width: 15px;
-		}
-		.scroll_enabled::-webkit-scrollbar-corner {
-		    background: rgba(0,0,0,0);
-		}
-		.scroll_enabled::-webkit-scrollbar-thumb {
-		    background-color: #ccc;
-		    border-radius: 6px;
-		    border: 4px solid rgba(0,0,0,0);
-		    background-clip: content-box;
-		    min-width: 32px;
-		    min-height: 32px;
-		}
-		.scroll_enabled::-webkit-scrollbar-track {
-		    background-color: rgba(0,0,0,0);
-		}
-		</style>
-    `;
-    
-    await joplin.views.panels.setHtml(panel, titleHTML + scrollStyleHTML +
-				             `<div class="scroll_enabled">` +
- 				             html +
-				             `</div>`);
+async function propagateTFBackend(event) {
+    const tfjsBackend = await joplinSettings.getSelectedBackend();
+    const be = await Lm.setBackend(tfjsBackend);
+    Log.log('tensorflow backend: ', be);
 }
 
 // todo
@@ -483,18 +196,9 @@ async function updateHTML(panel, html) {
 joplin.plugins.register({
     onStart: async function() {
 	await joplinSettings.registerSettings();
-	joplin.settings.onChange(async () => {
-	    const tfjsBackend = await joplinSettings.getSelectedBackend();
-	    Tf.setBackend(tfjsBackend);
-	    Log.log('tensorflow backend: ', Tf.getBackend());
-	})
+	joplin.settings.onChange(event => propagateTFBackend(event))
+	propagateTFBackend(null); // with default value
 	
-	const tfjsBackend = await joplinSettings.getSelectedBackend();
-	Tf.setBackend(tfjsBackend);
-	await Tf.ready(); // any perf issue of keeping this in prod code?
-	Log.log('tensorflow backend: ', Tf.getBackend());
-	//console.log(Tf.memory())
-
 	const selectNotePromptHTML = '<br /><i><center>Select a note to see similar notes</center></i>'
 
 	// Create the panel object
@@ -507,24 +211,11 @@ joplin.plugins.register({
 	const embeddingsDBPath = Path.join(pluginDir, 'embeddings.sqlite');
 	Log.log('Checking if "' + pluginDir + '" exists:', await Fs.pathExists(pluginDir));
 
-	const db = openDB(embeddingsDBPath);
+	const db = Db.openDB(embeddingsDBPath);
 
-	// the Favorites plugin does smt similar to what I envison wrt UI element
-	// (ie, it looks like the main note list in joplin)
-	//   https://emoji.discourse-cdn.com/twitter/house.png?v=10
-	async function updateUIWithNoteList(similar_notes) {
-	    const html_links = []
-	    for (const n of similar_notes) {
-		const ahref = `<i>(${n.relative_score}%)</i> <a href="#" onclick="webviewApi.postMessage({type:'openNote',noteId:'${n.id}'})">${escapeTitleText(n.title)}</a>`
-		html_links.push(ahref);
-	    }
-
-	    await updateHTML(panel, `${html_links.join('<br /><br />')}`);
-	}
-
-	await updateHTML(panel, '<center><i>Downloading model from Tensorflow Hub</i></center>')
-	const model = await Use.load();
-	console.log(Tf.memory())
+	await Ui.updateHTML(panel, '<center><i>Downloading model from Tensorflow Hub</i></center>')
+	const model = await Lm.loadModel();
+	//console.log(Tf.memory())
 	console.log(model);
 	
 	// not sure what i'm doing with this async/await stuff...
@@ -536,7 +227,7 @@ joplin.plugins.register({
 	//  everything from DB
 	// todo: don't include body in this list
 
-	await updateHTML(panel, selectNotePromptHTML);
+	await Ui.updateHTML(panel, selectNotePromptHTML);
 
 	// if reEmbed,
 	//   this will compute the embedding for the selected note,
@@ -555,7 +246,7 @@ joplin.plugins.register({
 	    if (note) {
 		console.log('selected note title:\n', note.title);
 
-		await updateHTML(panel, 'Computing similarities...');
+		await Ui.updateHTML(panel, 'Computing similarities...');
 
 		let embedding = null;
 		let noteObj = notes.get(note.id);
@@ -573,18 +264,12 @@ joplin.plugins.register({
 		    
 		if (reEmbed) { 
 		    const [document] = notes2docs([note]);
-		    //console.info('document:\n', document);
+		    [embedding] = await Lm.embed_batch(model, [document])
 
-		    const tensor = await model.embed(document);
-		    // tensor is 512dim embedding of document
-		
 		    // update our embedding of this note
-		    //console.log('pre tensing', tensor);
-		    embedding = tensor.arraySync()[0];
 		    noteObj['embedding'] = embedding;
 		    notes.set(note.id, noteObj);
-		    tensor.dispose(); // dispose here but create in search_similar_embeddings -> prob slow
-		    
+
 		    // persist the calculated embedding to disk
 		    // todo anyway to detect if the change doesn't make it?
 		    //  eg if pc lost power between the joplin note saving to disk
@@ -593,13 +278,13 @@ joplin.plugins.register({
 		    // - could compare timestamp of last note change with timestamp
 		    //   of last embedding change on startup
 		    //console.log('test before save');
-		    saveEmbeddings(db, [note.id], [embedding]);
+		    Db.saveEmbeddings(db, [note.id], [embedding]);
 		} else {
 		    embedding = noteObj['embedding'];
 		}
 
 		//console.log('tensing', embedding);
-		const [sorted_note_ids, similar_note_scores] = search_similar_embeddings(embedding, notes);
+		const [sorted_note_ids, similar_note_scores] = Lm.search_similar_embeddings(embedding, notes);
 		//console.log(sorted_note_ids, similar_note_scores);
 
 		// todo optimize this...
@@ -622,14 +307,14 @@ joplin.plugins.register({
 		    //console.info(n.title, ": ", similar_note_scores[i]);
 		}
 		
-		updateUIWithNoteList(sorted_notes);
+		Ui.updateUIWithNoteList(panel, sorted_notes);
 
 		// webgl BE requires manual mem mgmt.
 		// use tf.tidy to reduce risk of forgetting to call dispose
 
 		//model.dispose();
 	    } else {
-		await updateHTML(panel, selectNotePromptHTML);
+		await Ui.updateHTML(panel, selectNotePromptHTML);
 	    }
 	}
 

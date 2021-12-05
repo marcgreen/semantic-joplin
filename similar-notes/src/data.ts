@@ -95,7 +95,7 @@ export async function filterNotesByNotebookName(
   return filteredNotes;
   }
 
-// code borrowed from joplin link graph plugin
+// (re)introduce batch size option
 export async function getAllNotes(): Promise<Map<string, Note>> {
     var allNotes = []
     var page_num = 1;
@@ -122,6 +122,35 @@ export async function getAllNotes(): Promise<Map<string, Note>> {
     }
     return noteMap;
 }
+
+// async function pageNotes(computation: , withBodies: Boolean): Promise<Map<string, Note>> {
+//     var allNotes = []
+//     var page_num = 1;
+//     do {
+// 	// `parent_id` is the ID of the notebook containing the note.
+// 	var notes = await joplin.data.get(['notes'], {
+// 	    fields: withBodies
+// 		? ['id', 'parent_id', 'title', 'body']
+// 		: ['id', 'parent_id', 'title']
+
+// 	    order_by: 'updated_time',
+// 	    order_dir: 'DESC',
+// 	    limit: 100,
+// 	    page: page_num,
+// 	});
+// 	allNotes.push(...notes.items);
+// 	page_num++;
+//     } while (notes.has_more)
+
+//     const noteMap = new Map();
+//     for (const note of allNotes) {
+// 	noteDict = withBodies
+// 	    ? {id: note.id, title: note.title, parent_id: note.parent_id, body: note.body}
+// 	noteMap.set(note.id, noteDict)
+//     }
+//     return noteMap;
+// }
+
 
 
 // Fetches title of every note
