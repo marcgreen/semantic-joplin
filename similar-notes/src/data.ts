@@ -23,14 +23,19 @@ export async function getNotebooks(): Promise<Array<Notebook>> {
   return allNotebooks;
 }
 
-export interface Note {
+// title helps debug, but theoretically could be out-of-core
+export interface NoteHeader {
   id: string;
   parent_id: string;
   title: string;
-  body: string;
   linkedToCurrentNote?: boolean;
-  embedding: Array<number>;
-  relative_score: string;
+  embedding?: Array<number>;
+  relative_score?: string;
+}
+
+export interface Note {
+  header: NoteHeader;
+  body: string;
 }
 
 // Fetch notes
@@ -43,96 +48,71 @@ export interface Note {
 //   }
 // }
 
-/**
- * Returns a filtered map of notes by notebook name.
- */
-export async function filterNotesByNotebookName(
-  notes: Map<string, Note>,
-  notebooks: Array<Notebook>,
-  filteredNotebookNames: Array<string>,
-  shouldFilterChildren: boolean,
-  isIncludeFilter: boolean): Promise<Map<string, Note>> {
-  // No filtering needed.
-  if (filteredNotebookNames.length < 1) return notes;
+// /**
+//  * Returns a filtered map of notes by notebook name.
+//  */
+// export async function filterNotesByNotebookName(
+//   notes: Map<string, Note>,
+//   notebooks: Array<Notebook>,
+//   filteredNotebookNames: Array<string>,
+//   shouldFilterChildren: boolean,
+//   isIncludeFilter: boolean): Promise<Map<string, Note>> {
+//   // No filtering needed.
+//   if (filteredNotebookNames.length < 1) return notes;
 
-  const notebookIdsByName = new Map<string, string>();
-  notebooks.forEach(n => notebookIdsByName.set(n.title, n.id))
-  const notebooksById = new Map<string, Notebook>();
-  notebooks.forEach(n => notebooksById.set(n.id, n))
+//   const notebookIdsByName = new Map<string, string>();
+//   notebooks.forEach(n => notebookIdsByName.set(n.title, n.id))
+//   const notebooksById = new Map<string, Notebook>();
+//   notebooks.forEach(n => notebooksById.set(n.id, n))
 
-  // Get a list of valid notebook names to filter out.
-  filteredNotebookNames = filteredNotebookNames.filter(name => notebookIdsByName.has(name));
+//   // Get a list of valid notebook names to filter out.
+//   filteredNotebookNames = filteredNotebookNames.filter(name => notebookIdsByName.has(name));
 
-  function shouldIncludeNote(parent_id: string): boolean {
-    var parentNotebook: Notebook = notebooksById.get(parent_id)
-    // Filter out the direct parent.
-    console.log("parent ", parentNotebook.title);
-    console.log("there", filteredNotebookNames.includes(parentNotebook.title));
-    if (filteredNotebookNames.includes(parentNotebook.title)) {
-      return isIncludeFilter;
-    }
+//   function shouldIncludeNote(parent_id: string): boolean {
+//     var parentNotebook: Notebook = notebooksById.get(parent_id)
+//     // Filter out the direct parent.
+//     console.log("parent ", parentNotebook.title);
+//     console.log("there", filteredNotebookNames.includes(parentNotebook.title));
+//     if (filteredNotebookNames.includes(parentNotebook.title)) {
+//       return isIncludeFilter;
+//     }
 
-    // Filter a note if any of its ancestor notebooks are filtered.
-    if (shouldFilterChildren) {
-      while (parentNotebook !== undefined) {
-        console.log("here")
-        if (filteredNotebookNames.includes(parentNotebook.title)) {
-          return isIncludeFilter;
-        }
-        parentNotebook = notebooksById.get(parentNotebook.parent_id);
-      }
-    }
-    return !isIncludeFilter;
-  }
+//     // Filter a note if any of its ancestor notebooks are filtered.
+//     if (shouldFilterChildren) {
+//       while (parentNotebook !== undefined) {
+//         console.log("here")
+//         if (filteredNotebookNames.includes(parentNotebook.title)) {
+//           return isIncludeFilter;
+//         }
+//         parentNotebook = notebooksById.get(parentNotebook.parent_id);
+//       }
+//     }
+//     return !isIncludeFilter;
+//   }
 
-  var filteredNotes = new Map<string, Note>();
-  notes.forEach(function(n, id) {
-    if (shouldIncludeNote(n.parent_id)) {
-      filteredNotes.set(id, n);
-    }
-  });
+//   var filteredNotes = new Map<string, Note>();
+//   notes.forEach(function(n, id) {
+//     if (shouldIncludeNote(n.parent_id)) {
+//       filteredNotes.set(id, n);
+//     }
+//   });
 
-  return filteredNotes;
-  }
+//   return filteredNotes;
+//   }
 
 // (re)introduce batch size option
-export async function getAllNotes(): Promise<Map<string, Note>> {
-    var allNotes = []
-    var page_num = 1;
-    do {
-	// `parent_id` is the ID of the notebook containing the note.
-	var notes = await joplin.data.get(['notes'], {
-	    fields: ['id', 'parent_id', 'title', 'body'],
-	    // for semantic similarity, updated_time seems like an irrelevant ordering.
-	    // maybe, extract top keywords from current note, FTS those, order by...relevancy?
-	    // - just a potential optimization to display semantically similar notes faster.
-	    //   not actually sure how long takes to getAllNotes in practice.
-	    order_by: 'updated_time',
-	    order_dir: 'DESC',
-	    limit: 100,
-	    page: page_num,
-	});
-	allNotes.push(...notes.items);
-	page_num++;
-    } while (notes.has_more)
-
-    const noteMap = new Map();
-    for (const note of allNotes) {
-	noteMap.set(note.id, {id: note.id, title: note.title, parent_id: note.parent_id, body: note.body})
-    }
-    return noteMap;
-}
-
-// async function pageNotes(computation: , withBodies: Boolean): Promise<Map<string, Note>> {
+// turn this into pageNotes below; takes a fn
+// export async function getAllNotes(): Promise<Map<string, Note>> {
 //     var allNotes = []
 //     var page_num = 1;
 //     do {
 // 	// `parent_id` is the ID of the notebook containing the note.
 // 	var notes = await joplin.data.get(['notes'], {
-// 	    fields: withBodies
-// 		? ['id', 'parent_id', 'title', 'body']
-// 		: ['id', 'parent_id', 'title']
-
+// 	    fields: ['id', 'parent_id', 'title', 'body'],
+// 	    // for semantic similarity, updated_time seems like an irrelevant ordering.
+// 	    // maybe, extract top keywords from current note, FTS those, order by...relevancy?
+// 	    // - just a potential optimization to display semantically similar notes faster.
+// 	    //   not actually sure how long takes to getAllNotes in practice.
 // 	    order_by: 'updated_time',
 // 	    order_dir: 'DESC',
 // 	    limit: 100,
@@ -144,17 +124,40 @@ export async function getAllNotes(): Promise<Map<string, Note>> {
 
 //     const noteMap = new Map();
 //     for (const note of allNotes) {
-// 	noteDict = withBodies
-// 	    ? {id: note.id, title: note.title, parent_id: note.parent_id, body: note.body}
-// 	noteMap.set(note.id, noteDict)
+// 	noteMap.set(note.id, {id: note.id, title: note.title, parent_id: note.parent_id, body: note.body})
 //     }
 //     return noteMap;
 // }
 
+// we don't page through all notes.
+// instead, we buffer a batch via individual fetches.
+// well, is GETting one note at a time worse than batching /this/ call
+//   and then filtering out already-seen-IDs?
+export async function* pageThroughNotesByIDs(forIDs: Array<string>, batch_size: number): AsyncGenerator<Map<string, Note>, void, void> {
+  let batch: Map<string, Note> = new Map();
+//  for (let i = 0; i < batch_size; i++) {
+  for (let id_index = 0; id_index < forIDs.length; id_index++) {
+    let note = await joplin.data.get(['notes', forIDs[id_index]], {
+      fields: ['id', 'parent_id', 'title', 'body'],
+      order_by: 'updated_time',
+      order_dir: 'DESC',
+      limit: batch_size,
+      //page: 1,
+    });
+      
+    let noteHeader: NoteHeader = {id: note.id, title: note.title, parent_id: note.parent_id};//, embedding: null, relative_score: null};
+    let noteObj: Note = {header: noteHeader, body: note.body};
+      batch.set(note.id, noteObj);
+      
+    if (batch.size >= batch_size) {
+      yield batch;
+      batch = new Map();
+    }
+  }
+}
 
-
-// Fetches title of every note
-async function getAllNoteTitles(): Promise<Map<string, Note>> {
+// Fetches header (without embedding) of every note
+export async function getAllNoteHeaders(): Promise<Map<string, NoteHeader>> {
   var allNotes = []
   var page_num = 1;
   do {

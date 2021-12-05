@@ -36,9 +36,10 @@ export async function embed_batch(model, batch) {
   try {
     tensors = await model.embed(batch);
   } catch (err) {
-    Log.error('err embedding batch: ', err);
+    //Log.error('err embedding batch: ', err);
     //Log.log('moving to the next batch');
-    return embeddings;
+    //return embeddings;
+    throw err;
   }
   //console.log(tensors)
 
@@ -88,12 +89,12 @@ export function search_similar_embeddings(embedding, notes) {
 
   //console.log(ts.length)
   //console.log(notes);
-  //console.log(embedding); // this prints a 512dim even after gpu_init error
+  console.log(embedding); // this prints a 512dim even after gpu_init error
   const tensor1 = Tf.tensor1d(embedding);
-  //let i = 0;
+  let i = 0;
   for (const [id, n] of notes.entries()) {
-    //console.log(i, id, n);
-    //i += 1;
+    console.log(i, id, n, n.embedding);
+    i += 1;
     const tensor2: Tf.Tensor = Tf.tensor1d(n.embedding);
     const x = Tf.dot(tensor1, tensor2.transpose());
     const y = x.dataSync();

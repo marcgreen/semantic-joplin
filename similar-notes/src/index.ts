@@ -46,115 +46,154 @@ Lm.enableProd();
 //     }
 // }
 
-function notes2docs(notes) {
+function notes2docs(notes: Array<joplinData.Note>) {
   console.log('notes: ', notes);
   let docs = [];
   for (const n of notes) {
     //docs.push(n.title);
-    docs.push(n.title + "\n" + n.body);
+    docs.push(n.header.title + "\n" + n.body);
   }
   return docs;
 }
 
-async function getAllNoteEmbeddings(model, db, panel) {
+
+// creates new embeddings batch_size at a time
+// deletes embeddings from db for notes no longer in joplin
+// returns map of note id to note header (with embedding)
+async function syncEmbeddings(model, db, panel): Promise<Map<string, joplinData.NoteHeader>> {
   let progressHTML = '<center><i>Computing/loading embeddings</i></center>';
   await Ui.updateHTML(panel, progressHTML);
   
-  const allNotes = await joplinData.getAllNotes();
-  const allNoteIDs = [...allNotes.keys()];
+  // id->noteHeader w/ embeddings based on loaded + newly created
+  // we fill this in as we go and return this at the end
+  const canonNoteHeaders = await joplinData.getAllNoteHeaders();
+  const canonNoteIDs = [...canonNoteHeaders.keys()];
 
-  progressHTML += `<br /><br />Total # notes: ${allNoteIDs.length}`;
+  progressHTML += `<br /><br />Total # notes: ${canonNoteIDs.length}`;
   await Ui.updateHTML(panel, progressHTML);
   
   // try loading saved embeddings first
   // determine which notes don't yet have embeddings, compute and save those
 
-  // split the remaining notes needing to be embedded from allNotes,
-  //   based on what was loaded
   const savedEmbeddings = await Db.loadEmbeddings(db);     // map of noteID to 512dim array
   const knownIDs = [...savedEmbeddings.keys()];
   console.log('savedEmbeddings:', savedEmbeddings);
-  const unembeddedIDs = allNoteIDs.filter(id => !knownIDs.includes(id));
-  let remainingNotes = new Map();
-  for (const nid of unembeddedIDs) {
-    remainingNotes.set(nid, allNotes.get(nid));
-  }
 
+  progressHTML += `<br />Saved # embeddings: ${knownIDs.length}`;
+
+  
   // todo use event queue to handle this better
   // delete notes from DB that are no longer in joplin proper
-  const deletedIDs = knownIDs.filter(id => !allNoteIDs.includes(id));
+  const deletedIDs = knownIDs.filter(id => !canonNoteIDs.includes(id));
   console.log('note embeddings to delete from db: ', deletedIDs);
   for (const nid of deletedIDs) {
     Db.deleteEmbedding(db, nid);
     savedEmbeddings.delete(nid);
   }
 
-  progressHTML += `<br />Saved # embeddings: ${knownIDs.length}`;
-  progressHTML += `<br />Remaining # embeddings: ${unembeddedIDs.length}`;
+  // savedEmbeddings has id->{embedding} of relevant loaded embeddings
+  for (const [nid, dict] of savedEmbeddings) {
+    const n = canonNoteHeaders.get(nid);
+    n.embedding = dict.embedding;
+    canonNoteHeaders.set(nid, n);
+  }
+
   await Ui.updateHTML(panel, progressHTML);
 
-  // process the remaining notes
-  const remaining_documents = notes2docs(remainingNotes.values());
-  Log.log('creating embeddings');
-  //const tensors = await model.embed(['test']);
-  let embeddings = [];
+  // batch encode the unembedded notes
+  let remainingNoteHeaders = new Map();
+  // split the remaining notes needing to be embedded from allNotes,
+  //   based on what was loaded
+  const unembeddedIDs = canonNoteIDs.filter(id => !knownIDs.includes(id));
+  
+  progressHTML += `<br />Remaining # embeddings: ${unembeddedIDs.length}`;
+
+  
+  // now that we page, maybe rewrite to not bother iterating over ids
+  // and instead just filter the loaded/remaining from canon? todo
+  for (const nid of unembeddedIDs) {
+    remainingNoteHeaders.set(nid, canonNoteHeaders.get(nid));
+  }
   const batch_size = Math.max(1, await joplin.settings.value('SETTING_BATCH_SIZE'));
-  const num_batches = Math.floor(remaining_documents.length/batch_size);
-  const remaining = remaining_documents.length % batch_size;
+  const num_batches = Math.floor(remainingNoteHeaders.size/batch_size);
+  const remaining = remainingNoteHeaders.size % batch_size;
   Log.log('batches to run ', num_batches, ' ', remaining);
 
   progressHTML += `<br /><br />Batch Size: ${batch_size} notes`;
   progressHTML += `<br /># full batches: ${num_batches}`;
   progressHTML += `<br /># notes in final partial batch: ${remaining}`;
   await Ui.updateHTML(panel, progressHTML);
-  
 
-  progressHTML += "<br />";
-  for (let i = 0; i < num_batches; i++) {
-    const slice = remaining_documents.slice(i*batch_size, (i+1)*batch_size);
-    const idSlice = unembeddedIDs.slice(i*batch_size, (i+1)*batch_size);
+  // process the remaining notes
+  // use a generator around joplin data api to batch for out-of-core
+  //let createdEmbeddings = []
+  let i = 0;
+  for await (const noteMap of joplinData.pageThroughNotesByIDs(unembeddedIDs, batch_size)) {
+    console.log('starting batch ', i);
+    const documentBatch = notes2docs([...noteMap.values()]);
+    const idBatch = [...noteMap.keys()];
+    
+    Log.log('creating embeddings');
+    //const tensors = await model.embed(['test']);
+    //let embeddings = [];
+    
+    progressHTML += "<br />";
+//  for (let i = 0; i < num_batches; i++) {
+    //const slice = remaining_documents.slice(i*batch_size, (i+1)*batch_size);
+    //const idSlice = unembeddedIDs.slice(i*batch_size, (i+1)*batch_size);
     
     //console.log(i, slice);
+    let e = null;
     let startTime = new Date().getTime();
-    const e = await Lm.embed_batch(model, slice);
+    try {
+      e = await Lm.embed_batch(model, documentBatch);
+    } catch (err) {
+      Log.error('err embedding batch: ', err);
+      Log.log('moving to the next batch');
+      continue;
+    }
     // originally designed this way to accommodate model crashing on large input, 
     // but didn't end up figuring out how to force commit to DB before moving on,
     // so ought to be refactored...
-    Db.saveEmbeddings(db, idSlice, e);
+    Db.saveEmbeddings(db, idBatch, e);
 
     let endTime = new Date().getTime();
     let execTime = (endTime - startTime)/1000;
     //console.log('e: ', e)
-    embeddings = embeddings.concat(e);
+    //embeddings = embeddings.concat(e);
     //console.log('done ', i);
+
+    // track our newly created embeddings in the map we return
+    // ...this is the third/4th time we iterate over this batch...
+    // ...todo...
+    for (const nid of noteMap.keys()) {
+      const h = canonNoteHeaders.get(nid);
+      h.embedding = e.shift(); // iterating notes in order
+      canonNoteHeaders.set(nid, h);
+    }
 
     Log.log('finished batch ' + i, execTime + ' seconds elapsed');
     //console.log(Tf.memory(), Tf.engine(), Tf.env());
 
     progressHTML += `<br />Finished batch ${i+1} in ${execTime} seconds`;
     await Ui.updateHTML(panel, progressHTML);
-  }
-  if (remaining > 0) {
-    const slice = remaining_documents.slice(num_batches*batch_size);
-    const idSlice = unembeddedIDs.slice(num_batches*batch_size);
-    //console.log(slice);
-    const e = await Lm.embed_batch(model, slice);
-    Db.saveEmbeddings(db, idSlice, e);
-    embeddings = embeddings.concat(e);
     
-    progressHTML += `<br />Finished final batch`;
-    await Ui.updateHTML(panel, progressHTML);
+    i++;
   }
+  // if (remaining > 0) {
+  //   const slice = remaining_documents.slice(num_batches*batch_size);
+  //   const idSlice = unembeddedIDs.slice(num_batches*batch_size);
+  //   //console.log(slice);
+  //   const e = await Lm.embed_batch(model, slice);
+  //   Db.saveEmbeddings(db, idSlice, e);
+  //   embeddings = embeddings.concat(e);
+    
+  //   progressHTML += `<br />Finished final batch`;
+  //   await Ui.updateHTML(panel, progressHTML);
+  // }
   //const tensors = await model.embed(remaining_documents);
   //console.log('created', num_batches, ' ', remaining);
 
-  // create full Note objects based on loaded embeddings and created embeddings
-  // savedEmbeddings has id->{embedding} of loaded embeddings
-  for (const [nid, note] of savedEmbeddings) {
-    const n = allNotes.get(nid);
-    n['embedding'] = note.embedding;
-    allNotes.set(nid, n);
-  }
   
   //console.log(embeddings);
   // const keys = [....keys()];
@@ -162,17 +201,17 @@ async function getAllNoteEmbeddings(model, db, panel) {
   
   // embeddings is array of created embeddings
   // unembeddedIDs is array of noteIDs, same order+length as embeddings
-  for (let i = 0; i < unembeddedIDs.length; i += 1) {
-    const nid = unembeddedIDs[i];
-    let n = remainingNotes.get(nid);
-    n['embedding'] = embeddings[i];
-    //console.log(n);
-    allNotes.set(nid, n);
-    //embedding_map[allNotes[i].id] = tensors_array[i];
-  }
+  // for (let i = 0; i < unembeddedIDs.length; i += 1) {
+  //   const nid = unembeddedIDs[i];
+  //   let n = remainingNoteHeaders.get(nid);
+  //   n.embedding = embeddings[i];
+  //   //console.log(n);
+  //   canonNoteHeaders.set(nid, n);
+  //   //embedding_map[allNotes[i].id] = tensors_array[i];
+  // }
   //console.log('all notes with embeddings:', allNotes);
 
-  return allNotes;
+  return canonNoteHeaders;
 }
 
 
@@ -185,9 +224,11 @@ async function propagateTFBackend(event) {
 // todo
 // out of core compute and load embeddings
 // - await async and try/catch skip the problem notes
-// what about other batch var?
 // test syncing a deletion
 // version_bump script that also prepends to changelog via git commits
+// update readme list of bugs/feature reqs from community
+// update readme to accommodate this release
+// test with batch size 1, 6, 100 (on desktop)
 
 // done
 // tfjs backend setting
@@ -220,10 +261,11 @@ joplin.plugins.register({
     //console.log(Tf.memory())
     console.log(model);
     
-    // not sure what i'm doing with this async/await stuff...
-    // think I ought to rethink the design around this
-    // notes is map of id to note
-    let notes = await getAllNoteEmbeddings(model, db, panel);
+    // this syncs the embeddings in the db given the info from joplin,
+    // - creates new embeddings from notes not yet in embedding db
+    // - deletes embeddings of notes no longer in joplin
+    // returns map of id to note headers (with embedding)
+    let noteHeaders = await syncEmbeddings(model, db, panel);
     // todo move part of this function inside updateSimilarNoteList
     //  so that new note title names are accurate. but don't want to relaod
     //  everything from DB
@@ -251,26 +293,32 @@ joplin.plugins.register({
 	await Ui.updateHTML(panel, 'Computing similarities...');
 
 	let embedding = null;
-	let noteObj = notes.get(note.id);
+	let noteHeader = noteHeaders.get(note.id);
 	
 	// if there is no note object, it's a new note, so create note obj
 	// and "re"Embed it
-	if (!noteObj) {
+	if (!noteHeader) {
 	  reEmbed = true;
-	  noteObj = {id: note.id, title: note.title,
-		     parent_id: note.parent_id, body: note.body,
+	  noteHeader = {id: note.id, title: note.title,
+		     parent_id: note.parent_id, //body: note.body,
 		     embedding: null, // will be set in a sec
 		     relative_score: null // will be set in a sec
 		    }
 	}
 	
-	if (reEmbed) { 
-	  const [document] = notes2docs([note]);
+	if (reEmbed) {
+	  // update the other header info too
+	  noteHeader.title = note.title;
+	  noteHeader.parent_id = note.parent_id; // do we use this? todo
+
+	  const n: joplinData.Note = {header: noteHeader,
+				      body: note.body};
+	  const [document] = notes2docs([n]);
 	  [embedding] = await Lm.embed_batch(model, [document])
 
 	  // update our embedding of this note
-	  noteObj['embedding'] = embedding;
-	  notes.set(note.id, noteObj);
+	  noteHeader.embedding = embedding;
+	  noteHeaders.set(note.id, noteHeader);
 
 	  // persist the calculated embedding to disk
 	  // todo anyway to detect if the change doesn't make it?
@@ -282,11 +330,11 @@ joplin.plugins.register({
 	  //console.log('test before save');
 	  Db.saveEmbeddings(db, [note.id], [embedding]);
 	} else {
-	  embedding = noteObj['embedding'];
+	  embedding = noteHeader['embedding'];
 	}
 
 	//console.log('tensing', embedding);
-	const [sorted_note_ids, similar_note_scores] = Lm.search_similar_embeddings(embedding, notes);
+	const [sorted_note_ids, similar_note_scores] = Lm.search_similar_embeddings(embedding, noteHeaders);
 	//console.log(sorted_note_ids, similar_note_scores);
 
 	// todo optimize this...
@@ -294,7 +342,7 @@ joplin.plugins.register({
 	// - do large tensor multiplication of all note sims at once?
 	//   could do for 1:N note sims, but maybe also N:N?
 	let sorted_notes = [];
-	for (let i = 0; i < notes.size; i++) {
+	for (let i = 0; i < noteHeaders.size; i++) {
 	  //for (const nidx of sorted_note_ids) {
 	  const nidx = sorted_note_ids[i];
 
@@ -303,7 +351,7 @@ joplin.plugins.register({
 	    continue;
 	  }
 	  
-	  const n = notes.get(nidx);
+	  const n = noteHeaders.get(nidx);
 	  n['relative_score'] = (similar_note_scores[i]*100).toLocaleString(undefined, {maximumSignificantDigits: 2});
 	  sorted_notes.push(n);
 	  //console.info(n.title, ": ", similar_note_scores[i]);
@@ -347,7 +395,8 @@ joplin.plugins.register({
     //     updateSimilarNoteList();
     // });
 
-    updateSimilarNoteList('startup', false);
+    // bugs if this is false? todo
+    updateSimilarNoteList('startup', true);
   },
 });
 
