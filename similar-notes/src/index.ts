@@ -11,8 +11,6 @@ Tf.enableProdMode(); // not sure the extent to which this helps
 //Tf.ENV.set('WEBGL_NUM_MB_BEFORE_PAGING', 4000);
 //console.log(Tf.memory())
 
-//Tf.setBackend('cpu');
-
 // partial todo list
 // - optimize if necessary (don't unstack tensors, *Sync() to *(), fix all await/async/promises)
 // - - save USE model to disk so it's not redownloaded every time
@@ -80,6 +78,8 @@ async function loadEmbeddings(db) {
     return notes;
     //db.close();
 }
+
+
 
 function saveEmbeddings(db, idSlice, embeddings) {
     //console.info('saving', idSlice, embeddings);
@@ -260,6 +260,96 @@ function notes2docs(notes) {
     }
     return docs;
 }
+
+// need to create initial embeddings while fetching ntoes in batches of 100 (default)
+// this sounds perfect for async / promises
+// currently, code does:
+// onstart
+// openDB
+// model = await Use.load()
+// notes = await getAllNoteEmbeddings()
+//
+//   allNotes = await getAllNotes() // only want to get 100 here,
+//   loadEmbeddings() // fine to load all in mem since even with
+//     100,000 notes * 4byte(?)*512 floats is less than 256mb
+//   given all loaded embeddings and all notes, filter the ones we don't know yet
+//   - this needs to be reworked to accommodate only loading 100 at a time.
+//       maybe just keep track of them per batch of 100, and then after loading all 100,
+//       we know the id of the ones to create embeddings for...but is there an easy way
+//       to load those selectively again?
+//   - instead of just knowing the id, just keep in memory the ones we don't have
+//       embeddings for, and toss the rest. and create embeddings for these ones.
+//       ie, move the filter to the batch for loop
+//   deletion of ids we have embeddings for but not in allNotes -> can't do in batches
+//     bc they aren't sorted (we don't know if they will show up later)
+//   - could accumulate these ids during batch and delete them all at the end in a loop
+//   notes2doc in batch
+//   calc # of batches
+//   - can we know the # of total notes before batching? do we need to iterate through
+//     all notes once to find that, and iterate again to batch? presumably the first
+//     iteration would go orders faster since the encoding is the slow bit. can check
+//     the joplin api to see if this is readily available in a call
+//       could then technically accumulate deletion ids in this first iteration
+//         well we could just select only the id column from the db from this first
+//         iteration. but why not just select all note IDs in getAllNotes first, too?
+// think this through ->
+//   batch the full size
+//     - move filter for unknown and accumulate over-known ids here.
+//       how slow is it to create and dispose tensors? is that relevant to this?
+//       ie, would we want to hold onto them in memory for cross product recalcs?
+//         especially when sub'd to event model and update scores for all notes against
+//         all other notes (NxNx512). maybe we need to do this in batches, too. but also
+//         on-demand if the user switches to a note if it takes more than a sec or two?
+//         this makes less worthwhile to do NxNx512 bc any add/edit/delete will trigger
+//         the computation delay that I'm trying to get rid of. worthwhile nonetheless?
+//     calc the batch, unstack the tensors, verb the tensors,
+//       accumulate values, save values to db
+//   batch the remaining
+//   from loaded and created embeddings, create full note object
+//   - want to only track id and embedding (and maybe title), not the body
+
+// ask laurent if joplin has an onShutdown, bc that feels like the proper time
+//   to dispose() of the model and also tensors (new to js + tfjs so not entirely
+//   sure what i'm talking about)
+
+// i wonder ratio of successful:error users of the plugin so far? afaik, incl me,
+// it's 1:2.
+
+// one result on google says roman's error is caused from too much memoryin use,
+//   so laurent's idea might fix that. maybe allNotes takes up too much space for
+//   tfjs to compute the embedding of one of his larger notes?
+//   wonder what his largest notes sizes are.
+//   what if this doesn't fix it though? then would need to break up large notes
+//     into a series of smaller notes and average their embeddings or smt?
+//     or at least detect it and skip the note for now (distinguish in note list UI too)
+// - https://github.com/tensorflow/tfjs/issues/1644#issuecomment-498322722
+
+// about whitewall's...what happens after calcing the # batches?
+// - async func def for embd
+// - starts batch loop
+//   - 2 array slices, start a timer, call embed(), then update html
+// could add console.info statements to verify where it's hanging, but it's probably
+// in the call the embed the first 100 docs
+// - could encode docs one at a time to see if either that fixes it or at least
+//   reveals a particular note it consistent hangs on
+// could print out doc body length of each batch before embedding
+//yes good idea
+
+// whitewall' largest note is only 60kb.
+// - he has a diff gfx card than me, so maybe switching to cpu backend would work? could add option to plugin to let user choose?
+//   - otoh, wouldn't the runtime select cpu if the gfx card didn't support webgl or something? only maybe i guess?
+//     - wonder why i can't see the console.info tf backend in the console log?
+
+// could do a patch to potentially help debug:
+// would like to figure out how to show console logs outside of 'dev mode'
+// - or could print to webview
+// add option to change to cpu backend
+// - test how much slower it is on my machine first: 25-50x
+// - register setting: https://joplinapp.org/api/references/plugin_api/classes/joplinsettings.html
+// - - how to set default value, but also get whatever value user set?
+// add option to reduce number of docs per batch
+// handle out-of-core
+// include changelog in repo and share with joplin forum once i push this
 
 async function getAllNoteEmbeddings(model, db, panel) {
     let progressHTML = '<center><i>Computing/loading embeddings</i></center>';
@@ -455,7 +545,11 @@ async function updateHTML(panel, html) {
 
 joplin.plugins.register({
     onStart: async function() {
-	await Tf.ready(); // any perf issue of keeping this in prod code?
+
+	Tf.setBackend('cpu');
+
+
+	//await Tf.ready(); // any perf issue of keeping this in prod code?
 	console.info('tensorflow backend: ', Tf.getBackend());
 	//console.log(Tf.memory())
 
