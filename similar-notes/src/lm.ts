@@ -93,7 +93,7 @@ export function search_similar_embeddings(embedding, notes) {
   const tensor1 = Tf.tensor1d(embedding);
   let i = 0;
   for (const [id, n] of notes.entries()) {
-    console.log(i, id, n, n.embedding);
+      console.log(i, id, n);
     i += 1;
     const tensor2: Tf.Tensor = Tf.tensor1d(n.embedding);
     const x = Tf.dot(tensor1, tensor2.transpose());

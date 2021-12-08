@@ -147,13 +147,15 @@ export async function* pageThroughNotesByIDs(forIDs: Array<string>, batch_size: 
       
     let noteHeader: NoteHeader = {id: note.id, title: note.title, parent_id: note.parent_id};//, embedding: null, relative_score: null};
     let noteObj: Note = {header: noteHeader, body: note.body};
-      batch.set(note.id, noteObj);
+    batch.set(note.id, noteObj);
       
     if (batch.size >= batch_size) {
       yield batch;
       batch = new Map();
     }
   }
+
+  yield batch; // the final (partial) batch
 }
 
 // Fetches header (without embedding) of every note

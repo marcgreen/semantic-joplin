@@ -73,7 +73,7 @@ async function syncEmbeddings(model, db, panel): Promise<Map<string, joplinData.
   // try loading saved embeddings first
   // determine which notes don't yet have embeddings, compute and save those
 
-  const savedEmbeddings = await Db.loadEmbeddings(db);     // map of noteID to 512dim array
+  const savedEmbeddings = await Db.loadEmbeddings(db); // map of noteID to 512dim array
   const knownIDs = [...savedEmbeddings.keys()];
   console.log('savedEmbeddings:', savedEmbeddings);
 
@@ -99,7 +99,7 @@ async function syncEmbeddings(model, db, panel): Promise<Map<string, joplinData.
   await Ui.updateHTML(panel, progressHTML);
 
   // batch encode the unembedded notes
-  let remainingNoteHeaders = new Map();
+  // let remainingNoteHeaders = new Map();
   // split the remaining notes needing to be embedded from allNotes,
   //   based on what was loaded
   const unembeddedIDs = canonNoteIDs.filter(id => !knownIDs.includes(id));
@@ -109,12 +109,13 @@ async function syncEmbeddings(model, db, panel): Promise<Map<string, joplinData.
   
   // now that we page, maybe rewrite to not bother iterating over ids
   // and instead just filter the loaded/remaining from canon? todo
-  for (const nid of unembeddedIDs) {
-    remainingNoteHeaders.set(nid, canonNoteHeaders.get(nid));
-  }
+  // for (const nid of unembeddedIDs) {
+  //   remainingNoteHeaders.set(nid, canonNoteHeaders.get(nid));
+  // }
+
   const batch_size = Math.max(1, await joplin.settings.value('SETTING_BATCH_SIZE'));
-  const num_batches = Math.floor(remainingNoteHeaders.size/batch_size);
-  const remaining = remainingNoteHeaders.size % batch_size;
+  const num_batches = Math.floor(unembeddedIDs.length/batch_size);
+  const remaining = unembeddedIDs.length % batch_size;
   Log.log('batches to run ', num_batches, ' ', remaining);
 
   progressHTML += `<br /><br />Batch Size: ${batch_size} notes`;
@@ -124,6 +125,11 @@ async function syncEmbeddings(model, db, panel): Promise<Map<string, joplinData.
 
   // process the remaining notes
   // use a generator around joplin data api to batch for out-of-core
+    // optimization: change algo based on how many notes there are.
+    // ie, loop through all when there are a lot to embed
+    // and 1 at a time when there are only a few.
+    // currently doing latter all the time.
+    // 
   //let createdEmbeddings = []
   let i = 0;
   for await (const noteMap of joplinData.pageThroughNotesByIDs(unembeddedIDs, batch_size)) {
@@ -157,7 +163,7 @@ async function syncEmbeddings(model, db, panel): Promise<Map<string, joplinData.
 
     let endTime = new Date().getTime();
     let execTime = (endTime - startTime)/1000;
-    //console.log('e: ', e)
+    console.log('e should be array, first ele first embedding: ', e)
     //embeddings = embeddings.concat(e);
     //console.log('done ', i);
 
@@ -267,10 +273,6 @@ async function propagateTFBackend(event) {
 //   from loaded and created embeddings, create full note object
 //   - want to only track id and embedding (and maybe title), not the body
 
-// ask laurent if joplin has an onShutdown, bc that feels like the proper time
-//   to dispose() of the model and also tensors (new to js + tfjs so not entirely
-//   sure what i'm talking about)
-
 // i wonder ratio of successful:error users of the plugin so far? afaik, incl me,
 // it's 1:2.
 
@@ -293,22 +295,6 @@ async function propagateTFBackend(event) {
 //   reveals a particular note it consistent hangs on
 // could print out doc body length of each batch before embedding
 //yes good idea
-
-// whitewall' largest note is only 60kb.
-// - he has a diff gfx card than me, so maybe switching to cpu backend would work? could add option to plugin to let user choose?
-//   - otoh, wouldn't the runtime select cpu if the gfx card didn't support webgl or something? only maybe i guess?
-//     - wonder why i can't see the console.info tf backend in the console log?
-
-// could do a patch to potentially help debug:
-// would like to figure out how to show console logs outside of 'dev mode'
-// - or could print to webview
-// add option to change to cpu backend
-// - test how much slower it is on my machine first: 25-50x
-// - register setting: https://joplinapp.org/api/references/plugin_api/classes/joplinsettings.html
-// - - how to set default value, but also get whatever value user set?
-// add option to reduce number of docs per batch
-// handle out-of-core
-// include changelog in repo and share with joplin forum once i push this
 
 
 // new notes
@@ -423,8 +409,9 @@ joplin.plugins.register({
 	} else {
 	  embedding = noteHeader['embedding'];
 	}
-
-	//console.log('tensing', embedding);
+	  
+	  console.log('noteHeaders w/o embeddings ', [...noteHeaders.values()].filter(h => !h.embedding));
+	//console.log('embeddings: ', embedding);
 	const [sorted_note_ids, similar_note_scores] = Lm.search_similar_embeddings(embedding, noteHeaders);
 	//console.log(sorted_note_ids, similar_note_scores);
 
