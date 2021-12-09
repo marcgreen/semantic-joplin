@@ -30,6 +30,17 @@ Testing the model against my own corpus of notes, I am satisified enough with it
 
 Because we're using a dense neural network, computation of the embeddings is relatively slow. However, even after the embeddings are computed, just computing the 512x512 dot product to determine similarity takes a noticeable amount of time. This isn't surprising, as a few times during development I chose to forego obvious optimizations in order to finish this first version of the plugin within the time constraints I was given. I have ideas on how to optimize these computations, but for now, it seems to take a couple seconds to show results every time you switch notes. Still, fast enough to be useful, in my opinion.
 
+## Crude Semantic Search
+
+By creating a new note with your search query, you can retrigger similarity calculations to perform your semantic search.
+
+Anecdotally, I've only /meaningfully/ used this a total of one time so far to search "past" word endings and find notes based on words that had the same "stem". Which makes sense, since words with the same stem are likely going to be semantically similar to each other.
+
+Example: "analogy" and "analogies" won't find each other in keyword search, but they can find each other in semantic search.
+
+## Debugging
+
+Logs can be found at `%APPDATA%\Roaming\@joplin\app-desktop\logs` and also I think `~\.config\joplin-desktop\log.txt`
 
 ## Caveats/Limitations
 
@@ -37,8 +48,10 @@ Because we're using a dense neural network, computation of the embeddings is rel
 - requires internet connection to download the USE model every startup. would like to save it locally after first download
 - no support for attachments yet
 
-## Future Work / Bugfixes
+## Known Issues
 
+- button, command+keyboard shortcut, and menu item(?) to show/hide the panel
+- - if this is really common, would be cool to abstract that into a lib or smt
 - start initial embedding computation only on user trigger, not automatically
 - when switching between notes quickly, it's not clear list is outdated for a few secs
   - need to abort the computation onSelectionChange
@@ -47,13 +60,11 @@ Because we're using a dense neural network, computation of the embeddings is rel
 - optimize similarity calculations, and when they happen, for more responsive UI
 - save USE model locally, so it needn't be downloaded every time the plugin loads
 - fix potential edge case of note embedding unsyncing from note content
-- note list will still show notes that were deleted until next launch
-- names of new notes created won't be visible in list until next launch
-  - both this and showing deleted notes can be resolved by moving part of
-    getAllNoteEmbeddings() into updateSimilarNoteList()
 - could recompute onSync, compromising between onSelect and onChange
-- button to show/hide the web panel?
-- change UI to look identical to default joplin note list
+- change list UI to look identical to default joplin note list
+
+## Future Work
+
 - viz note similarities in 2d or 3d - tfjs supports this to some extent
 - optionally include note's tags in the embeddings (test how this changes results per note in practice)
 - - see gensim impl here: https://medium.com/wisio/a-gentle-introduction-to-doc2vec-db3e8c0cce5e

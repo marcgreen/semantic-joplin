@@ -1,3 +1,5 @@
+import * as joplinData from './data';
+
 //const Tf = require('@tensorflow/tfjs');
 import * as Tf from '@tensorflow/tfjs';
 const Use = require('@tensorflow-models/universal-sentence-encoder');
@@ -26,8 +28,19 @@ export async function setBackend(be) {
 //     // otherwise, download from tfhub and save it to disk
 // }
 
-export async function embed_batch(model, batch) {
+// given model from loadModel(),
+// and batch as a list of sentences/documents to embed
+// run the model on the batch, unstack and sync the tensors
+// and return a list of embeddings:
+// 1 embedding per element in batch array
+// each embedding is itself a 512 element array of floats
+export async function embed_batch(model, batch: Array<string>): Promise<Array<number>> {
   let embeddings = [];
+
+  // for testing
+  // if (Math.random() > parseFloat(".5")) {
+  //   throw 'errmergerd';
+  // }
 
   //const model = await Use.load();
   //Tf.engine().startScope();
@@ -36,6 +49,7 @@ export async function embed_batch(model, batch) {
   try {
     tensors = await model.embed(batch);
   } catch (err) {
+    Log.error('err embedding batch: ', err);
     //Log.error('err embedding batch: ', err);
     //Log.log('moving to the next batch');
     //return embeddings;
@@ -67,7 +81,7 @@ export async function embed_batch(model, batch) {
 
 
 // consider looking at how doc2vec impls this for optimization inspo
-export function search_similar_embeddings(embedding, notes) {
+export function search_similar_embeddings(embedding: Array<number>, notes: Map<string, joplinData.NoteHeader>) {
   // tensor is 1x512
   // tensors is Nx512 where N = # notes
   
@@ -89,12 +103,12 @@ export function search_similar_embeddings(embedding, notes) {
 
   //console.log(ts.length)
   //console.log(notes);
-  console.log(embedding); // this prints a 512dim even after gpu_init error
+  //console.log(embedding); // this prints a 512dim even after gpu_init error
   const tensor1 = Tf.tensor1d(embedding);
-  let i = 0;
+  //let i = 0;
   for (const [id, n] of notes.entries()) {
-      console.log(i, id, n);
-    i += 1;
+    //console.log(i, id, n);
+    //i += 1;
     const tensor2: Tf.Tensor = Tf.tensor1d(n.embedding);
     const x = Tf.dot(tensor1, tensor2.transpose());
     const y = x.dataSync();

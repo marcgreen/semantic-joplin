@@ -1,4 +1,5 @@
 import joplin from 'api';
+import * as joplinData from './data'; // not sure how I feel about this?
 
 // borrowed from backlinks plugin: https://github.com/ambrt/joplin-plugin-referencing-notes/blob/master/src/index.ts
 function escapeTitleText(text: string) {
@@ -8,7 +9,7 @@ function escapeTitleText(text: string) {
 // the Favorites plugin does smt similar to what I envison wrt UI element
 // (ie, it looks like the main note list in joplin)
 //   https://emoji.discourse-cdn.com/twitter/house.png?v=10
-export async function updateUIWithNoteList(panel, similar_notes) {
+export async function updateUIWithNoteList(panel, similar_notes: Array<joplinData.NoteHeader>) {
   const html_links = []
   for (const n of similar_notes) {
     const ahref = `<i>(${n.relative_score}%)</i> <a href="#" onclick="webviewApi.postMessage({type:'openNote',noteId:'${n.id}'})">${escapeTitleText(n.title)}</a>`

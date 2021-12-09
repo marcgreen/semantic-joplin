@@ -54,6 +54,13 @@ function notes2docs(notes: Array<joplinData.Note>) {
   return docs;
 }
 
+// do the exact same as syncEmbeddings, but don't change the webview output at all
+// (specifically used to hide sync at the start of every note change)
+async function silentSyncEmbeddings(model, db, panel): Promise<Map<string, joplinData.NoteHeader>> {
+  // pass in a mock panel? turn off smt in Ui? if end up passing it a param, then don't need this func anymore
+  // todo
+  return null;
+}
 
 // creates new embeddings batch_size at a time
 // deletes embeddings from db for notes no longer in joplin
@@ -152,7 +159,6 @@ async function syncEmbeddings(model, db, panel): Promise<Map<string, joplinData.
     try {
       e = await Lm.embed_batch(model, documentBatch);
     } catch (err) {
-      Log.error('err embedding batch: ', err);
       Log.log('moving to the next batch');
       continue;
     }
@@ -163,7 +169,7 @@ async function syncEmbeddings(model, db, panel): Promise<Map<string, joplinData.
 
     let endTime = new Date().getTime();
     let execTime = (endTime - startTime)/1000;
-    console.log('e should be array, first ele first embedding: ', e)
+    //console.log('e should be array, first ele first embedding: ', e)
     //embeddings = embeddings.concat(e);
     //console.log('done ', i);
 
@@ -284,6 +290,7 @@ async function propagateTFBackend(event) {
 //     into a series of smaller notes and average their embeddings or smt?
 //     or at least detect it and skip the note for now (distinguish in note list UI too)
 // - https://github.com/tensorflow/tfjs/issues/1644#issuecomment-498322722
+// added more logging around the embedding to hopefully catch the error he posted
 
 // about whitewall's...what happens after calcing the # batches?
 // - async func def for embd
@@ -294,23 +301,31 @@ async function propagateTFBackend(event) {
 // - could encode docs one at a time to see if either that fixes it or at least
 //   reveals a particular note it consistent hangs on
 // could print out doc body length of each batch before embedding
-//yes good idea
+// hopefully solved by cpu backend
 
 
-// new notes
 // todo
-// out of core compute and load embeddings
-// - await async and try/catch skip the problem notes
-// test syncing a deletion
 // version_bump script that also prepends to changelog via git commits
-// update readme list of bugs/feature reqs from community
-// update readme to accommodate this release
+// - maybe next time
+// race conditions when deleting notes?
+// - aborting computations upon note change would fix this
 // test with batch size 1, 6, 100 (on desktop)
 
 // done
+// update readme list of bugs/feature reqs from community
+// update readme to accommodate this release
+// test syncing a deletion
+// test updating title w/o restart
+// why do hyperlinks no longer work?
+// out-of-core initial processing
+// out of core compute and load embeddings
+// - await async and try/catch skip the problem notes
 // tfjs backend setting
 // - include model batch size setting
 // need to enable log messages to find which note is causing hang-up
+// model batch size setting (set to 1 to help debug note specific issues)
+// log messages to help diagnose note-specific issues
+// - log file is ... ?
 // inversion of control design
 
 joplin.plugins.register({
@@ -363,6 +378,10 @@ joplin.plugins.register({
       // Get the current note from the workspace.
       const note = await joplin.workspace.selectedNote();
 
+      // refresh our cache of noteheaders (with updated titles, eg)
+      // will this take too long?
+      noteHeaders = await syncEmbeddings(model, db, panel);
+
       // Keep in mind that it can be `null` if nothing is currently selected!
       if (note) {
 	console.log('selected note title:\n', note.title);
@@ -384,14 +403,16 @@ joplin.plugins.register({
 	}
 	
 	if (reEmbed) {
-	  // update the other header info too
-	  noteHeader.title = note.title;
-	  noteHeader.parent_id = note.parent_id; // do we use this? todo
-
 	  const n: joplinData.Note = {header: noteHeader,
 				      body: note.body};
 	  const [document] = notes2docs([n]);
-	  [embedding] = await Lm.embed_batch(model, [document])
+	  try {
+	    [embedding] = await Lm.embed_batch(model, [document])
+	  } catch (err) {
+	    Log.log("err embedding note, that's weird");
+	    await Ui.updateHTML(panel, "Error embedding note: " + note.title + ' - ' + note.id);
+	    return;
+	  }
 
 	  // update our embedding of this note
 	  noteHeader.embedding = embedding;
@@ -410,16 +431,16 @@ joplin.plugins.register({
 	  embedding = noteHeader['embedding'];
 	}
 	  
-	  console.log('noteHeaders w/o embeddings ', [...noteHeaders.values()].filter(h => !h.embedding));
+	  //console.log('noteHeaders w/o embeddings ', [...noteHeaders.values()].filter(h => !h.embedding));
 	//console.log('embeddings: ', embedding);
 	const [sorted_note_ids, similar_note_scores] = Lm.search_similar_embeddings(embedding, noteHeaders);
 	//console.log(sorted_note_ids, similar_note_scores);
 
 	// todo optimize this...
-	// - keep things as tensors?
+	// - keep things as tensors? but when to dispose then? no onShutdown
 	// - do large tensor multiplication of all note sims at once?
 	//   could do for 1:N note sims, but maybe also N:N?
-	let sorted_notes = [];
+	let sorted_notes: Array<joplinData.NoteHeader> = [];
 	for (let i = 0; i < noteHeaders.size; i++) {
 	  //for (const nidx of sorted_note_ids) {
 	  const nidx = sorted_note_ids[i];
@@ -430,6 +451,7 @@ joplin.plugins.register({
 	  }
 	  
 	  const n = noteHeaders.get(nidx);
+//	  console.log(n);
 	  n['relative_score'] = (similar_note_scores[i]*100).toLocaleString(undefined, {maximumSignificantDigits: 2});
 	  sorted_notes.push(n);
 	  //console.info(n.title, ": ", similar_note_scores[i]);

@@ -182,7 +182,8 @@ export async function getAllNoteHeaders(): Promise<Map<string, NoteHeader>> {
   const noteMap = new Map();
   for (const note of allNotes) {
     var links = getAllLinksForNote(note.body);
-    noteMap.set(note.id, {title: note.title, parent_id: note.parent_id, links: links})
+    noteMap.set(note.id, {id: note.id, title: note.title,
+			  parent_id: note.parent_id, links: links})
   }
   return noteMap;
 }
