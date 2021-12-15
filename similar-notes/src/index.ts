@@ -23,6 +23,22 @@ Lm.enableProd();
 // - manually test some edge cases?
 // - compare semantic similarity results with full USE model, vs this USE lite model
 
+// next patch:
+// - update readme to exlpain settings (if no progress at startup after while, set backend to cpu and try again)
+// - use tf.data.generator instead of my own generator?
+//     also has a batch function
+//   - use async versions to impl throttling?
+//     - can also abort onNotechange with this?
+
+
+// future patch:
+// version_bump script that also prepends to changelog via git commits
+// - maybe next time
+// race conditions when deleting notes?
+// - aborting computations upon note change would fix this
+// - use tidy in case there's a memleak?
+
+
 // async function loadEmbeddings() {
 //     try {
 // 	// check if file exists. if not, assume this is the first time user is using this plugin
@@ -304,29 +320,7 @@ async function propagateTFBackend(event) {
 // hopefully solved by cpu backend
 
 
-// todo
-// version_bump script that also prepends to changelog via git commits
-// - maybe next time
-// race conditions when deleting notes?
-// - aborting computations upon note change would fix this
-// test with batch size 1, 6, 100 (on desktop)
 
-// done
-// update readme list of bugs/feature reqs from community
-// update readme to accommodate this release
-// test syncing a deletion
-// test updating title w/o restart
-// why do hyperlinks no longer work?
-// out-of-core initial processing
-// out of core compute and load embeddings
-// - await async and try/catch skip the problem notes
-// tfjs backend setting
-// - include model batch size setting
-// need to enable log messages to find which note is causing hang-up
-// model batch size setting (set to 1 to help debug note specific issues)
-// log messages to help diagnose note-specific issues
-// - log file is ... ?
-// inversion of control design
 
 joplin.plugins.register({
   onStart: async function() {

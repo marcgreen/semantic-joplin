@@ -6,13 +6,36 @@ The intent of this plugin is to help the joplin user find notes they have that m
 
 Disclaimer: This plugin was written during a 2-week hackathon, without prior javascript or tensorflow experience, and the code quality reflects this. PRs are welcome, but I do plan to refactor things with the knowledge I now have after getting it to the current state.
 
+## Potential Use Cases
+
+### Suggesting relevant notes from your corpus to link to
+
+TODO insert content from joplin forum post
+
+### Find duplicate and near-duplicate notes
+
+If there's a lot of words in common between the notes, they'll likely be very semantically similar to each other.
+
+### Crude Semantic Search
+
+By creating a new note with your search query, you can retrigger similarity calculations to perform your semantic search.
+
+Anecdotally, I've only /meaningfully/ used this a total of one time so far to ignore word endings and find notes based on words that had the same "stem". Which makes sense, since words with the same stem are likely going to be semantically similar to each other.
+
+Example: "analogy" and "analogies" won't find each other in keyword search, but they can find each other in semantic search.
+
+
+
 ### On First Use
+
+TODO: document cpu/gpu and batch size options and how they can help in this step
 
 On first startup, this plugin will calculate embeddings for all of your notes. **This can take some minutes** (less than 2min for my 800 notes totalling 5mb not including attachments on my desktop computer). It saves these embeddings to disk and loads from there on subsequent startups. Of course, if you work on notes outside of where this plugin runs, then upon sync, it will need to calculate embeddings for those notes too. It's future work to make this happen upon user request vs automatically at startup.
 
 **If you have notes larger than a few hundred KBs, this might take a long time.** Notes larger than 1MB might even make the model hang, I'm not entirely sure yet. The largest notes in my corpus are a few hundred KB. I think calculating the embeddings is exponential on note size, or at least superlinear.
 
 Please let me know your system specs (cpu+ram, gpu+vram) and how big your largest notes are (excl. attachments) if it takes longer than 10min to do a single batch during the initial embeddings.
+
 
 ## Semanticness
 
@@ -30,13 +53,6 @@ Testing the model against my own corpus of notes, I am satisified enough with it
 
 Because we're using a dense neural network, computation of the embeddings is relatively slow. However, even after the embeddings are computed, just computing the 512x512 dot product to determine similarity takes a noticeable amount of time. This isn't surprising, as a few times during development I chose to forego obvious optimizations in order to finish this first version of the plugin within the time constraints I was given. I have ideas on how to optimize these computations, but for now, it seems to take a couple seconds to show results every time you switch notes. Still, fast enough to be useful, in my opinion.
 
-## Crude Semantic Search
-
-By creating a new note with your search query, you can retrigger similarity calculations to perform your semantic search.
-
-Anecdotally, I've only /meaningfully/ used this a total of one time so far to search "past" word endings and find notes based on words that had the same "stem". Which makes sense, since words with the same stem are likely going to be semantically similar to each other.
-
-Example: "analogy" and "analogies" won't find each other in keyword search, but they can find each other in semantic search.
 
 ## Debugging
 
@@ -50,12 +66,12 @@ Logs can be found at `%APPDATA%\Roaming\@joplin\app-desktop\logs` and also I thi
 
 ## Known Issues
 
+- bad UX to start initial embedding computation on startup and not user trigger since it can hog resources
 - button, command+keyboard shortcut, and menu item(?) to show/hide the panel
 - - if this is really common, would be cool to abstract that into a lib or smt
-- start initial embedding computation only on user trigger, not automatically
 - when switching between notes quickly, it's not clear list is outdated for a few secs
   - need to abort the computation onSelectionChange
-- remove linked notes from results (since they are obv already known/accounted for by user)
+- visually distinguish linked notes from unlinked notes in results (since they are obv already known/accounted for by user)
 - setting to exclude specified notebooks from being included (borrow more code from Note Graph UI plugin)
 - optimize similarity calculations, and when they happen, for more responsive UI
 - save USE model locally, so it needn't be downloaded every time the plugin loads
