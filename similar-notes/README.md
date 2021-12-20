@@ -84,12 +84,15 @@ Logs can be found at `%APPDATA%\Roaming\@joplin\app-desktop\logs` and also I thi
 - viz note similarities in 2d or 3d - tfjs supports this to some extent
 - optionally include note's tags in the embeddings (test how this changes results per note in practice)
 - - see gensim impl here: https://medium.com/wisio/a-gentle-introduction-to-doc2vec-db3e8c0cce5e
+- see what kind of results I get if I compute similarity to each note + all of the notes it is connected to via links and backlinks. (wonder how much input size to USE really affects result...)
+  - could do 1:n comparison as well as m:n (comparing graphs of notes to each other). maybe better terminology: 0:1 and 1:1 (representing size of graph in degress of separation)
 - compare results of USE lite with mobileBERT
 - compare results of USE lite with topic extraction + keyword search
 - summarize each note via some other LM, and show summary blurb in results list, to help user know what's in each similar note
   - maybe instead allow on-hover previews of the note? or on-hover/button summarizations/outline
 - wonder what results would be if we calculated similarity of multiple selected notes
   (using onSelectedNoteIds event). could average the selected note embeddings
+
 
 ## Questions
 
