@@ -1,3 +1,7 @@
+0.2.1
+
+272fb10 print embed exception to UI for troubleshooting
+
 0.2.0
 
 516f55d option to use cpu instead of webgl for tfjs backend
