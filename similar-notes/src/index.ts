@@ -401,10 +401,10 @@ joplin.plugins.register({
 				      body: note.body};
 	  const [document] = notes2docs([n]);
 	  try {
-	    [embedding] = await Lm.embed_batch(model, [document])
+	    [embedding] = await Lm.embed_batch(model, [document]);
 	  } catch (err) {
 	    Log.log("err embedding note, that's weird");
-	    await Ui.updateHTML(panel, "Error embedding note: " + note.title + ' - ' + note.id);
+	    await Ui.updateHTML(panel, `Error embedding note: '${err}' - ${note.title} - ${note.id}`);
 	    return;
 	  }
 
