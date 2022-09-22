@@ -1,4 +1,5 @@
 import joplin from 'api';
+
 import * as Ui from './ui';
 import * as Lm from './lm';
 import * as Db from './db';

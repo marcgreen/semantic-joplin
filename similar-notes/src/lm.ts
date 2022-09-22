@@ -2,7 +2,34 @@ import * as joplinData from './data';
 
 //const Tf = require('@tensorflow/tfjs');
 import * as Tf from '@tensorflow/tfjs';
+
+import {setWasmPaths} from '@tensorflow/tfjs-backend-wasm';
+
+import wasmSimdPath from '../node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-simd.wasm';
+import wasmSimdThreadedPath from '../node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-threaded-simd.wasm';
+import wasmPath from '../node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm.wasm';
+
+setWasmPaths({
+  'tfjs-backend-wasm.wasm': wasmPath,
+  'tfjs-backend-wasm-simd.wasm': wasmSimdPath,
+  'tfjs-backend-wasm-threaded-simd.wasm': wasmSimdThreadedPath
+});
+//import {setWasmPaths} from '@tensorflow/tfjs-backend-wasm';
+
+//import wasmSimdPath from './node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-simd.wasm';
+//import wasmSimdThreadedPath from './node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-threaded-simd.wasm';
+// import wasmPath from '/home/marc/semantic_joplin/similar-notes/node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm.wasm';
+
+// setWasmPaths({
+//   'tfjs-backend-wasm.wasm': wasmPath,
+// //  'tfjs-backend-wasm-simd.wasm': wasmSimdPath,
+// //  'tfjs-backend-wasm-threaded-simd.wasm': wasmSimdThreadedPath
+// });
+
+//require('@tensorflow/tfjs-backend-wasm'); 
+import '@tensorflow/tfjs-backend-wasm'; // Add the WASM backend to the global backend registry.
 const Use = require('@tensorflow-models/universal-sentence-encoder');
+
 
 const Log = require('electron-log')
 
