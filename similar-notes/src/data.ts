@@ -29,13 +29,31 @@ export interface NoteHeader {
   parent_id: string;
   title: string;
   linkedToCurrentNote?: boolean;
-  embedding?: Array<number>;
+}
+
+export interface Chunk {
+  index: number; // corresponds to chunkstrat.amount
+  text: string;
+  embedding?: number[]
   relative_score?: string;
+  note_id: string
+}
+
+export interface ChunkStrategy {
+  unit: string; // word, sentence, paragraph, md section, note
+  amount: number;
+}
+
+export interface Experiment {
+  strategy: ChunkStrategy;
+  id2embeds: Map<string, number[]> // so we don't need to load the actual text
+  chunks: Chunk[];
 }
 
 export interface Note {
   header: NoteHeader;
-  body: string;
+  // each experiment is a way of chunking the source text (eg per note, per 100 words)
+  experiments: Experiment[]
 }
 
 // Fetch notes
